@@ -36,11 +36,23 @@ def get_supabase() -> Client:
         try:
             _client = create_client(url, key)
         except Exception as e:
+            hint = ""
+            if "invalid api key" in str(e).lower():
+                hint = (
+                    " This specific error is almost always caused by an outdated "
+                    "'supabase' Python package that pre-dates Supabase's newer "
+                    "non-JWT key format (sb_secret_... / sb_publishable_...). "
+                    "Older SDK versions try to validate the key as a JWT and "
+                    "reject it locally before any network call is made. "
+                    "Fix: ensure requirements.txt pins supabase>=2.20.0,<3.0.0 "
+                    "and that the deployment actually reinstalled dependencies "
+                    "(clear the build cache on Render if needed)."
+                )
             raise RuntimeError(
                 "Failed to initialize the Supabase client with the provided "
                 "SUPABASE_URL / SUPABASE_SECRET_KEY. Verify that SUPABASE_URL "
                 "is correct and that SUPABASE_SECRET_KEY is a valid, active "
-                f"secret key for that project. Original error: {e}"
+                f"secret key for that project.{hint} Original error: {e}"
             ) from e
 
     return _client

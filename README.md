@@ -77,8 +77,10 @@ cp .env.example .env
 ```
 Fill in at minimum:
 - `SECRET_KEY` — any long random string
-- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` — from Supabase project settings → API
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` — from Supabase project settings → API → Secret keys (`sb_secret_...`)
 - `MAIL_*` — SMTP credentials (Gmail app password works fine for testing)
+
+> **Note:** This project uses Supabase's newer non-JWT `sb_secret_...` key format, not the legacy `service_role` JWT. This requires `supabase-py>=2.20.0` (already pinned in `requirements.txt`). If you ever see `SupabaseException: Invalid API key` raised directly from inside `create_client()`, it means an old `supabase-py` version got installed — clear your host's build cache and reinstall so it picks up the pinned version.
 
 Payment gateway keys (`STRIPE_*`, `PAYSTACK_*`, `FLUTTERWAVE_*`) are optional — wallet payments work without them.
 
