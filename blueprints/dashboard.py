@@ -483,7 +483,7 @@ def become_seller():
 
     session["role"] = "seller"
     log_audit(uid, "became_seller", details={"store_name": store_name})
-    flash(f"Welcome to MercX Sellers! Your store "{store_name}" is live. 🎉", "success")
+    flash(f'Welcome to MercX Sellers! Your store "{store_name}" is live. 🎉', "success")
     return redirect(url_for("seller.dashboard"))
 
 

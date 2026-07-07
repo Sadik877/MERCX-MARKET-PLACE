@@ -516,7 +516,7 @@ def categories():
                 "name": name, "slug": slug,
                 "description": desc, "icon": icon, "color": color,
             })
-            flash(f"Category "{name}" created.", "success")
+            flash(f'Category "{name}" created.', "success")
         return redirect(url_for("admin.categories"))
 
     cats = db_select("categories", "*", order="sort_order")
@@ -560,7 +560,7 @@ def coupons():
                 "description": desc,
                 "is_active":   True,
             })
-            flash(f"Coupon "{code}" created.", "success")
+            flash(f'Coupon "{code}" created.', "success")
         return redirect(url_for("admin.coupons"))
 
     all_coupons = db_select("coupons", "*", order="-created_at")

@@ -308,10 +308,10 @@ def cart_add(listing_id):
     existing = db_select("cart_items", "id",
                          filters={"user_id": uid, "listing_id": listing_id}, single=True)
     if existing:
-        flash(f""{listing['title']}" is already in your cart.", "info")
+        flash(f'"{listing["title"]}" is already in your cart.', "info")
     else:
         db_insert("cart_items", {"user_id": uid, "listing_id": listing_id})
-        flash(f""{listing['title']}" added to cart!", "success")
+        flash(f'"{listing["title"]}" added to cart!', "success")
 
     next_url = request.form.get("next") or request.referrer or url_for("marketplace.cart")
     return redirect(next_url)
@@ -366,7 +366,7 @@ def apply_coupon():
         return redirect(url_for("marketplace.cart"))
 
     session["cart_coupon"] = code
-    flash(f"Coupon "{code}" applied! 🎉", "success")
+    flash(f'Coupon "{code}" applied! 🎉', "success")
     return redirect(url_for("marketplace.cart"))
 
 
