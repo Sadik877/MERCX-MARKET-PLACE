@@ -9,10 +9,10 @@ def get_supabase() -> Client:
     global _client
     if _client is None:
         url = current_app.config["SUPABASE_URL"]
-        key = current_app.config["SUPABASE_SERVICE_KEY"]
+        key = current_app.config["SUPABASE_SECRET_KEY"]
         if not url or not key:
             raise RuntimeError(
-                "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment."
+                "SUPABASE_URL and SUPABASE_SECRET_KEY must be set in environment."
             )
         _client = create_client(url, key)
     return _client
