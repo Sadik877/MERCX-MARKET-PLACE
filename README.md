@@ -77,7 +77,7 @@ cp .env.example .env
 ```
 Fill in at minimum:
 - `SECRET_KEY` — any long random string
-- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` — from Supabase project settings → API
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` — from Supabase project settings → API
 - `MAIL_*` — SMTP credentials (Gmail app password works fine for testing)
 
 Payment gateway keys (`STRIPE_*`, `PAYSTACK_*`, `FLUTTERWAVE_*`) are optional — wallet payments work without them.
@@ -115,6 +115,6 @@ Then visit `/admin` while logged in as that user.
 
 ## Notes
 
-- **RLS**: The schema enables Row Level Security on core tables. The Flask backend uses the Supabase **service role key**, which bypasses RLS — this is expected since all access control happens in the Flask app itself.
+- **RLS**: The schema enables Row Level Security on core tables. The Flask backend uses the Supabase **secret key** (`SUPABASE_SECRET_KEY`), which bypasses RLS — this is expected since all access control happens in the Flask app itself.
 - **File delivery**: Digital files are stored in Supabase Storage and delivered via signed URLs with configurable expiry (`DOWNLOAD_EXPIRY_DAYS`) and download limits (`MAX_DOWNLOADS`).
 - **Commission rate**: Set via `COMMISSION_RATE` in `.env` (default 10%), applied automatically to seller payouts on order completion.

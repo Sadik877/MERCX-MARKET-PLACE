@@ -5,16 +5,44 @@ import functools
 _client: Client | None = None
 
 def get_supabase() -> Client:
-    """Return a singleton Supabase client using the service-role key."""
+    """
+    Return a singleton Supabase client.
+
+    Reads exactly two environment variables:
+        - SUPABASE_URL
+        - SUPABASE_SECRET_KEY
+
+    Raises a clear RuntimeError naming the specific missing variable,
+    and surfaces a clean error if the SDK rejects the provided key.
+    """
     global _client
     if _client is None:
-        url = current_app.config["SUPABASE_URL"]
-        key = current_app.config["SUPABASE_SECRET_KEY"]
-        if not url or not key:
+        url = current_app.config.get("SUPABASE_URL", "")
+        key = current_app.config.get("SUPABASE_SECRET_KEY", "")
+
+        # Validate each variable independently so the error message is specific.
+        if not url:
             raise RuntimeError(
-                "SUPABASE_URL and SUPABASE_SECRET_KEY must be set in environment."
+                "Missing environment variable: SUPABASE_URL. "
+                "Set it to your project's Supabase URL (Project Settings → API)."
             )
-        _client = create_client(url, key)
+        if not key:
+            raise RuntimeError(
+                "Missing environment variable: SUPABASE_SECRET_KEY. "
+                "Set it to your project's Supabase secret API key "
+                "(Project Settings → API → Secret keys)."
+            )
+
+        try:
+            _client = create_client(url, key)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to initialize the Supabase client with the provided "
+                "SUPABASE_URL / SUPABASE_SECRET_KEY. Verify that SUPABASE_URL "
+                "is correct and that SUPABASE_SECRET_KEY is a valid, active "
+                f"secret key for that project. Original error: {e}"
+            ) from e
+
     return _client
 
 
