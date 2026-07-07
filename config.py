@@ -20,7 +20,7 @@ class Config:
 
     # ── Supabase ──────────────────────────────────────────────
     SUPABASE_URL         = os.environ.get("SUPABASE_URL", "")
-    SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY", "")
     SUPABASE_ANON_KEY    = os.environ.get("SUPABASE_ANON_KEY", "")
     SUPABASE_BUCKET      = os.environ.get("SUPABASE_STORAGE_BUCKET", "mercx-assets")
 
