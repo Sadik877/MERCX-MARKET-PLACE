@@ -428,6 +428,29 @@ function initTabs() {
 }
 
 
+/* ── FAQ Accordion ──────────────────────────────────────────── */
+function initFaq() {
+  document.querySelectorAll('.faq-item').forEach(item => {
+    const question = item.querySelector('.faq-question');
+    const answer   = item.querySelector('.faq-answer');
+    if (!question || !answer) return;
+    question.addEventListener('click', () => {
+      const isOpen = item.classList.contains('open');
+      item.closest('[data-faq-group]')?.querySelectorAll('.faq-item').forEach(other => {
+        if (other !== item) { other.classList.remove('open'); other.querySelector('.faq-answer').style.maxHeight = null; }
+      });
+      if (isOpen) {
+        item.classList.remove('open');
+        answer.style.maxHeight = null;
+      } else {
+        item.classList.add('open');
+        answer.style.maxHeight = answer.scrollHeight + 'px';
+      }
+    });
+  });
+}
+
+
 /* ── Price Formatter ────────────────────────────────────────── */
 function fmtPrice(n) { return '$' + parseFloat(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
@@ -452,6 +475,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initConfirmForms();
   initDropdowns();
   initTabs();
+  initFaq();
 
   // Refresh badges if logged in
   const isLoggedIn = document.body.dataset.loggedIn === 'true';
