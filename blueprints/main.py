@@ -30,6 +30,14 @@ def index():
     # All categories
     categories = db_select("categories", filters={"is_active": True}, order="sort_order")
 
+    # Top sellers (by total sales)
+    top_sellers = db_select(
+        "user_profiles",
+        "user_id,store_name,store_slug,avatar_url,seller_verified,seller_rating,total_sales",
+        filters={"seller_verified": True},
+        order="-total_sales", limit=6
+    )
+
     # Stats
     stats = {
         "listings": db_select("listings", "id", filters={"status": "active", "is_approved": True}),
@@ -39,7 +47,7 @@ def index():
 
     return render_template("index.html",
         featured=featured, popular=popular, newest=newest,
-        categories=categories,
+        categories=categories, top_sellers=top_sellers,
         total_listings=len(stats["listings"]),
         total_sellers=len(stats["sellers"]),
         total_users=len(stats["users"]),
