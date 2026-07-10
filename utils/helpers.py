@@ -182,6 +182,47 @@ def generate_reference(prefix: str = "REF") -> str:
     return f"{prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
 
+# ── User-Agent Parsing ─────────────────────────────────────────
+
+def parse_user_agent(ua: str) -> dict:
+    """Best-effort browser/OS/device parsing from a User-Agent string.
+    Lightweight regex approach for admin display purposes only.
+    NOTE: Country/geolocation is intentionally not derived here — that
+    needs an IP geolocation service (e.g. MaxMind GeoLite2) which isn't
+    wired into this project; see the TODO in admin/logs.html.
+    """
+    if not ua:
+        return {"browser": "Unknown", "os": "Unknown", "device": "Unknown"}
+
+    browser = "Unknown"
+    for name, pattern in [
+        ("Edge", r"Edg/"), ("Opera", r"OPR/"), ("Chrome", r"Chrome/"),
+        ("Firefox", r"Firefox/"), ("Safari", r"Version/.*Safari/"),
+        ("Samsung Internet", r"SamsungBrowser/"),
+    ]:
+        if re.search(pattern, ua):
+            browser = name
+            break
+
+    os_name = "Unknown"
+    for name, pattern in [
+        ("Windows", r"Windows NT"), ("macOS", r"Mac OS X"), ("iOS", r"iPhone|iPad OS"),
+        ("Android", r"Android"), ("Linux", r"Linux"),
+    ]:
+        if re.search(pattern, ua):
+            os_name = name
+            break
+
+    if re.search(r"iPad|Tablet", ua):
+        device = "Tablet"
+    elif re.search(r"Mobi|iPhone|Android.*Mobile", ua):
+        device = "Mobile"
+    else:
+        device = "Desktop"
+
+    return {"browser": browser, "os": os_name, "device": device}
+
+
 # ── Audit logging helper ──────────────────────────────────────
 
 def log_audit(user_id, action: str, resource_type: str = None,
