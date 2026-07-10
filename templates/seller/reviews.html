@@ -1,0 +1,110 @@
+{% extends 'seller/base.html' %}
+{% block title %}Reviews — MercX Digital{% endblock %}
+{% block page_content %}
+<h1 class="font-display text-2xl font-bold mb-5">Customer Reviews</h1>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+  <!-- Average rating -->
+  <div class="card" style="text-align:center">
+    <div class="font-display font-bold" style="font-size:2.75rem;color:var(--gold)">{{ '%.1f'|format(avg_rating|float) }}</div>
+    <div style="display:flex;justify-content:center;gap:.15rem;margin:.35rem 0">
+      {% for i in range(1,6) %}<span style="font-size:1.1rem;color:{{ '#F59E0B' if i <= avg_rating|round(0,'floor') else 'var(--bg-elevated)' }}">★</span>{% endfor %}
+    </div>
+    <div style="font-size:.82rem;color:var(--text-muted)">Based on {{ total }} review{{ 's' if total != 1 }}</div>
+  </div>
+
+  <!-- Rating breakdown -->
+  <div class="card lg:col-span-2">
+    <h3 class="font-display font-bold text-sm mb-3">Rating Breakdown</h3>
+    {% for n in [5,4,3,2,1] %}
+    {% set count = rating_counts.get(n, 0) %}
+    {% set pct = (count / total * 100) if total else 0 %}
+    <a href="{{ url_for('seller.reviews', rating=n) }}" class="flex items-center gap-3 mb-2" style="text-decoration:none;color:inherit">
+      <span style="font-size:.8rem;width:32px;color:var(--text-muted)">{{ n }}★</span>
+      <div style="flex:1;height:8px;border-radius:4px;background:var(--bg-elevated);overflow:hidden">
+        <div style="height:100%;width:{{ pct }}%;background:linear-gradient(90deg,#7C3AED,#06B6D4)"></div>
+      </div>
+      <span style="font-size:.78rem;color:var(--text-dim);width:30px;text-align:right">{{ count }}</span>
+    </a>
+    {% endfor %}
+    {% if rating_filter %}
+    <a href="{{ url_for('seller.reviews') }}" class="btn btn-ghost btn-sm mt-2">Clear filter ({{ rating_filter }}★)</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if reviews %}
+<div class="space-y-4">
+  {% for r in reviews %}
+  <div class="card" id="review-{{ r.id }}">
+    <div class="flex items-start justify-between gap-4 mb-2 flex-wrap">
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <span style="font-weight:600;font-size:.9rem">{{ r.buyer.username if r.buyer else 'Buyer' }}</span>
+          {% if r.is_verified_purchase %}<span class="badge badge-accent" style="font-size:.65rem">Verified Purchase</span>{% endif %}
+        </div>
+        <div style="display:flex;gap:.1rem;margin-bottom:.35rem">
+          {% for i in range(1,6) %}<span style="font-size:.85rem;color:{{ '#F59E0B' if i<=r.rating else 'var(--bg-elevated)' }}">★</span>{% endfor %}
+        </div>
+        {% if r.listing %}
+        <a href="{{ url_for('marketplace.listing_detail', slug=r.listing.slug) }}" style="font-size:.78rem;color:var(--primary-light)">{{ r.listing.title }}</a>
+        {% endif %}
+      </div>
+      <span style="font-size:.78rem;color:var(--text-dim)">{{ r.created_at[:10] }}</span>
+    </div>
+    <p style="font-size:.88rem;color:var(--text-muted);line-height:1.65;margin-bottom:.75rem">{{ r.review_text or '' }}</p>
+
+    {% if r.seller_reply %}
+    <div style="background:var(--bg-surface);border-radius:var(--radius-sm);padding:.85rem 1rem;border-left:2px solid var(--primary)">
+      <div style="font-size:.75rem;font-weight:700;color:var(--primary-light);margin-bottom:.25rem">Your reply</div>
+      <div style="font-size:.85rem;color:var(--text-muted)">{{ r.seller_reply }}</div>
+    </div>
+    {% else %}
+    <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('reply-form-{{ r.id }}').classList.toggle('hidden')">
+      <i data-feather="corner-up-left" style="width:13px;height:13px"></i> Reply
+    </button>
+    <div id="reply-form-{{ r.id }}" class="hidden mt-3">
+      <textarea id="reply-text-{{ r.id }}" class="input" rows="3" placeholder="Write a public reply to this review…"></textarea>
+      <button type="button" class="btn btn-primary btn-sm mt-2" data-reply-review="{{ r.id }}">
+        <i data-feather="send" style="width:13px;height:13px"></i> Post Reply
+      </button>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:4rem">
+  <i data-feather="star" style="width:44px;height:44px;color:var(--text-dim);margin-bottom:1rem"></i>
+  <h3 class="font-display text-lg font-bold mb-2">{{ 'No reviews with this rating' if rating_filter else 'No reviews yet' }}</h3>
+  <p style="color:var(--text-muted)">{{ 'Try clearing the filter.' if rating_filter else 'Reviews from buyers will show up here once you make sales.' }}</p>
+</div>
+{% endif %}
+
+<script>
+document.querySelectorAll('[data-reply-review]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.replyReview;
+    const text = document.getElementById('reply-text-' + id).value.trim();
+    if (!text) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/reviews/${id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+        body: JSON.stringify({ reply: text })
+      });
+      if (res.ok) {
+        location.reload();
+      } else {
+        MercX.toast.show('Reply failed', 'Please try again.', 'error');
+        btn.disabled = false;
+      }
+    } catch (err) {
+      MercX.toast.show('Network error', 'Please check your connection and try again.', 'error');
+      btn.disabled = false;
+    }
+  });
+});
+</script>
+{% endblock %}

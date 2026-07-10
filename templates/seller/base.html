@@ -20,6 +20,7 @@
         ('seller.create_listing',  'plus-circle', 'Create Product'),
         ('seller.inventory',       'list',        'My Products'),
         ('seller.orders',          'shopping-cart','Orders'),
+        ('seller.reviews',         'star',        'Reviews'),
         ('seller.analytics',       'trending-up', 'Analytics'),
         ('seller.store_settings',  'settings',    'Store Settings'),
       ] %}
@@ -30,8 +31,14 @@
       </a>
       {% endfor %}
       <div class="divider"></div>
-      <a href="{{ url_for('dashboard.messages') }}" class="sidebar-link">
+      <a href="{{ url_for('dashboard.wallet') }}" class="sidebar-link {% if request.endpoint == 'dashboard.wallet' %}active{% endif %}">
+        <i data-feather="credit-card" class="icon"></i>Wallet & Withdrawals
+      </a>
+      <a href="{{ url_for('dashboard.messages') }}" class="sidebar-link {% if request.endpoint == 'dashboard.messages' %}active{% endif %}">
         <i data-feather="message-circle" class="icon"></i>Messages
+      </a>
+      <a href="{{ url_for('dashboard.notifications') }}" class="sidebar-link {% if request.endpoint == 'dashboard.notifications' %}active{% endif %}">
+        <i data-feather="bell" class="icon"></i>Notifications
       </a>
       <div class="sidebar-section mt-2">Switch</div>
       <a href="{{ url_for('dashboard.index') }}" class="sidebar-link">
@@ -50,6 +57,24 @@
   </aside>
   <!-- Main -->
   <main style="flex:1;padding:1.75rem;overflow-x:hidden;min-width:0">
+    <!-- Mobile sub-nav (visible below lg, where the sidebar is hidden) -->
+    <div class="subnav-scroll lg:hidden mb-5">
+      {% set mnav = [
+        ('seller.dashboard',       'bar-chart-2', 'Dashboard'),
+        ('seller.inventory',       'list',        'Products'),
+        ('seller.orders',          'shopping-cart','Orders'),
+        ('seller.reviews',         'star',        'Reviews'),
+        ('seller.analytics',       'trending-up', 'Analytics'),
+        ('dashboard.wallet',       'credit-card', 'Wallet'),
+        ('dashboard.messages',     'message-circle','Messages'),
+        ('seller.store_settings',  'settings',    'Settings'),
+      ] %}
+      {% for endpoint, icon, label in mnav %}
+      <a href="{{ url_for(endpoint) }}" class="sidebar-link {% if request.endpoint == endpoint %}active{% endif %}">
+        <i data-feather="{{ icon }}" class="icon" style="width:14px;height:14px"></i>{{ label }}
+      </a>
+      {% endfor %}
+    </div>
     {% block page_content %}{% endblock %}
   </main>
 </div>
