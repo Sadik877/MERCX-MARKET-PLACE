@@ -52,10 +52,18 @@ def index():
     paginated   = all_listings[start: start + per_page]
     pages       = max(1, -(-total // per_page))
 
+    # Current user's wishlist (for heart icon state on product cards)
+    wishlist_ids = set()
+    uid = session.get("user_id")
+    if uid:
+        wl_rows = db_select("wishlist", "listing_id", filters={"user_id": uid})
+        wishlist_ids = {row["listing_id"] for row in wl_rows}
+
     return render_template("marketplace/index.html",
         listings=paginated, categories=categories,
         current_category=category, sort=sort,
         total=total, page=page, pages=pages,
+        wishlist_ids=wishlist_ids,
     )
 
 

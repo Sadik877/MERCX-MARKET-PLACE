@@ -32,12 +32,20 @@ def dashboard():
     sid = _seller_id()
 
     # Quick stats
-    listings   = db_select("listings", "id,status,sales_count,views",
+    listings   = db_select("listings", "id,status,sales_count,views,rating",
                            filters={"seller_id": sid})
     active     = [l for l in listings if l["status"] == "active"]
     pending_ap = [l for l in listings if l["status"] == "pending"]
+    rejected   = [l for l in listings if l["status"] == "rejected"]
+    # NOTE: There is no 'draft' listing status in the schema's CHECK constraint
+    # (listings.status only allows pending/active/paused/rejected/deleted).
+    # TODO: to support real Draft products, add 'draft' to that CHECK constraint
+    # and default new incomplete listings to it instead of 'pending'.
 
-    orders_all = db_select("orders", "id,status,total,created_at",
+    rated = [l for l in listings if l.get("rating")]
+    avg_rating = round(sum(float(l["rating"]) for l in rated) / len(rated), 2) if rated else 0
+
+    orders_all = db_select("orders", "id,status,total,seller_earnings,created_at",
                            filters={"seller_id": sid}, order="-created_at")
     pending_orders = [o for o in orders_all if o["status"] in ("pending", "processing")]
     completed      = [o for o in orders_all if o["status"] == "completed"]
@@ -45,6 +53,10 @@ def dashboard():
     total_revenue = sum(float(o["total"]) for o in completed)
     total_sales   = len(completed)
     total_views   = sum(int(l.get("views") or 0) for l in listings)
+    conversion_rate = round((total_sales / total_views * 100), 2) if total_views > 0 else 0
+
+    # Earnings still tied up in orders that haven't completed yet
+    pending_balance = sum(float(o.get("seller_earnings") or 0) for o in pending_orders)
 
     # Monthly revenue (last 6 months)
     monthly = {}
@@ -57,6 +69,35 @@ def dashboard():
 
     # Recent orders
     recent_orders = orders_all[:10]
+
+    # Recent reviews
+    recent_reviews = db_select("reviews", "*", filters={"seller_id": sid},
+                               order="-created_at", limit=5)
+
+    # Recent withdrawals
+    recent_withdrawals = db_select("wallet_transactions", "*",
+                                   filters={"user_id": sid, "type": "withdrawal"},
+                                   order="-created_at", limit=5)
+
+    # Recent notifications
+    recent_notifications = db_select("notifications", "*", filters={"user_id": sid},
+                                     order="-created_at", limit=5)
+
+    # Recent messages (conversations where this seller is either participant)
+    recent_messages = db_select("conversations", "*", filters={"participant_1": sid},
+                                order="-last_message_at", limit=5)
+    recent_messages += db_select("conversations", "*", filters={"participant_2": sid},
+                                 order="-last_message_at", limit=5)
+    recent_messages.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
+    recent_messages = recent_messages[:5]
+    for c in recent_messages:
+        other_id = c["participant_2"] if c["participant_1"] == sid else c["participant_1"]
+        other = db_select("users", "id,username", filters={"id": other_id}, single=True)
+        c["other_user"] = other
+        c["unread"] = c["unread_count_1"] if c["participant_1"] == sid else c["unread_count_2"]
+        last_msgs = db_select("messages", "content", filters={"conversation_id": c["id"]},
+                              order="-created_at", limit=1)
+        c["last_message_preview"] = last_msgs[0]["content"] if last_msgs else ""
 
     # Pending manual deliveries
     manual_pending = []
@@ -71,14 +112,23 @@ def dashboard():
 
     return render_template("seller/dashboard.html",
         user=user, profile=profile,
+        balance=float((user or {}).get("balance", 0)),
+        pending_balance=pending_balance,
+        avg_rating=avg_rating,
+        conversion_rate=conversion_rate,
         total_listings=len(listings),
         active_listings=len(active),
         pending_approval=len(pending_ap),
+        rejected_listings=len(rejected),
         pending_orders=len(pending_orders),
         total_revenue=total_revenue,
         total_sales=total_sales,
         total_views=total_views,
         recent_orders=recent_orders,
+        recent_reviews=recent_reviews,
+        recent_withdrawals=recent_withdrawals,
+        recent_notifications=recent_notifications,
+        recent_messages=recent_messages,
         manual_pending=manual_pending,
         monthly_labels=monthly_labels,
         monthly_values=monthly_values,
@@ -336,6 +386,48 @@ def activate_listing(listing_id):
     return redirect(url_for("seller.inventory"))
 
 
+@seller_bp.route("/duplicate/<listing_id>", methods=["POST"])
+@seller_required
+def duplicate_listing(listing_id):
+    sid     = _seller_id()
+    listing = db_select("listings", "*", filters={"id": listing_id, "seller_id": sid}, single=True)
+    if not listing:
+        flash("Listing not found.", "danger")
+        return redirect(url_for("seller.inventory"))
+
+    copy_data = {
+        "seller_id":     sid,
+        "category_id":   listing.get("category_id"),
+        "title":         f"{listing['title']} (Copy)",
+        "slug":          make_slug(f"{listing['title']}-copy-{int(datetime.now().timestamp())}"),
+        "description":   listing.get("description"),
+        "short_description": listing.get("short_description"),
+        "price":         listing.get("price"),
+        "compare_price": listing.get("compare_price"),
+        "license_type":  listing.get("license_type"),
+        "version":       listing.get("version"),
+        "demo_url":      listing.get("demo_url"),
+        "documentation_url": listing.get("documentation_url"),
+        "support_included":  listing.get("support_included"),
+        "support_duration_days": listing.get("support_duration_days"),
+        "updates_included": listing.get("updates_included"),
+        "delivery_type": listing.get("delivery_type"),
+        "tags":          listing.get("tags"),
+        "file_format":   listing.get("file_format"),
+        "preview_images": listing.get("preview_images"),
+        "status":        "pending",
+        "is_approved":   False,
+    }
+    new_listing = db_insert("listings", copy_data)
+    if new_listing:
+        log_audit(sid, "duplicate_listing", resource_type="listing", resource_id=new_listing["id"],
+                  details={"source_listing_id": listing_id})
+        flash("Listing duplicated. Review and edit the copy before it goes live.", "success")
+    else:
+        flash("Failed to duplicate listing. Please try again.", "danger")
+    return redirect(url_for("seller.inventory"))
+
+
 # ── Inventory ─────────────────────────────────────────────────
 
 @seller_bp.route("/inventory")
@@ -344,6 +436,7 @@ def inventory():
     sid    = _seller_id()
     status = request.args.get("status", "")
     search = request.args.get("q", "").strip().lower()
+    sort   = request.args.get("sort", "newest")
     page   = int(request.args.get("page", 1))
 
     filters = {"seller_id": sid}
@@ -355,6 +448,17 @@ def inventory():
     if search:
         listings = [l for l in listings if search in (l.get("title") or "").lower()]
 
+    sort_key = {
+        "newest":     lambda l: l.get("created_at") or "",
+        "oldest":     lambda l: l.get("created_at") or "",
+        "price_high": lambda l: float(l.get("price") or 0),
+        "price_low":  lambda l: float(l.get("price") or 0),
+        "sales":      lambda l: int(l.get("sales_count") or 0),
+        "views":      lambda l: int(l.get("views") or 0),
+    }.get(sort)
+    if sort_key:
+        listings.sort(key=sort_key, reverse=sort not in ("oldest", "price_low"))
+
     per_page  = 20
     total     = len(listings)
     start     = (page - 1) * per_page
@@ -363,7 +467,7 @@ def inventory():
 
     return render_template("seller/inventory.html",
         listings=paginated, status=status,
-        search=search, page=page, pages=pages, total=total)
+        search=search, sort=sort, page=page, pages=pages, total=total)
 
 
 # ── Orders (Incoming) ─────────────────────────────────────────
@@ -373,6 +477,7 @@ def inventory():
 def orders():
     sid    = _seller_id()
     status = request.args.get("status", "")
+    search = request.args.get("q", "").strip().lower()
     page   = int(request.args.get("page", 1))
 
     filters = {"seller_id": sid}
@@ -384,7 +489,13 @@ def orders():
         buyer = db_select("users", "id,username,email",
                           filters={"id": o["buyer_id"]}, single=True)
         o["buyer"] = buyer
-        o["items"] = db_select("order_items", "*", filters={"order_id": o["id"]})
+        o["order_items"] = db_select("order_items", "*", filters={"order_id": o["id"]})
+
+    if search:
+        all_orders = [o for o in all_orders if
+                      search in o["id"].lower()
+                      or search in ((o.get("buyer") or {}).get("username") or "").lower()
+                      or search in ((o.get("buyer") or {}).get("email") or "").lower()]
 
     per_page  = 20
     total     = len(all_orders)
@@ -393,7 +504,7 @@ def orders():
     pages     = max(1, -(-total // per_page))
 
     return render_template("seller/orders.html",
-        orders=paginated, status=status, page=page, pages=pages, total=total)
+        orders=paginated, status=status, search=search, page=page, pages=pages, total=total)
 
 
 @seller_bp.route("/orders/<order_id>/deliver", methods=["POST"])
@@ -499,6 +610,37 @@ def analytics():
     )
 
 
+# ── Reviews ────────────────────────────────────────────────────
+
+@seller_bp.route("/reviews")
+@seller_required
+def reviews():
+    sid    = _seller_id()
+    rating_filter = request.args.get("rating", "")
+
+    all_reviews = db_select("reviews", "*", filters={"seller_id": sid}, order="-created_at")
+    for r in all_reviews:
+        buyer = db_select("users", "id,username", filters={"id": r["buyer_id"]}, single=True)
+        listing = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
+        r["buyer"] = buyer
+        r["listing"] = listing
+
+    rating_counts = {n: len([r for r in all_reviews if r["rating"] == n]) for n in range(1, 6)}
+    avg_rating = round(sum(r["rating"] for r in all_reviews) / len(all_reviews), 2) if all_reviews else 0
+
+    filtered = all_reviews
+    if rating_filter:
+        try:
+            filtered = [r for r in all_reviews if r["rating"] == int(rating_filter)]
+        except ValueError:
+            pass
+
+    return render_template("seller/reviews.html",
+        reviews=filtered, total=len(all_reviews),
+        rating_counts=rating_counts, avg_rating=avg_rating,
+        rating_filter=rating_filter)
+
+
 # ── Store Settings ────────────────────────────────────────────
 
 @seller_bp.route("/settings", methods=["GET", "POST"])
@@ -513,6 +655,7 @@ def store_settings():
         website    = request.form.get("website", "").strip()[:255]
         twitter    = request.form.get("twitter", "").strip()[:100]
         github     = request.form.get("github", "").strip()[:100]
+        linkedin   = request.form.get("linkedin", "").strip()[:100]
 
         from python_slugify import slugify as _slugify
         slug = _slugify(store_name)
@@ -524,6 +667,7 @@ def store_settings():
             "website":           website,
             "twitter":           twitter,
             "github":            github,
+            "linkedin":          linkedin,
         }, {"user_id": sid})
 
         # Banner upload

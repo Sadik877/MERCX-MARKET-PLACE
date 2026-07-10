@@ -36,6 +36,7 @@ def index():
 
     # Recent purchases
     purchases = db_select("orders", "*", filters={"buyer_id": uid}, order="-created_at", limit=5)
+    total_purchases = len(db_select("orders", "id", filters={"buyer_id": uid, "status": "completed"}))
     # Recent sales (if seller)
     sales = []
     if session.get("role") in ("seller", "admin"):
@@ -57,6 +58,7 @@ def index():
     return render_template("dashboard/index.html",
         user=user, profile=prof,
         purchases=purchases, sales=sales,
+        total_purchases=total_purchases,
         unread_notifications=len(all_notifs),
         wishlist_count=len(wl),
         total_spent=total_spent,
@@ -180,6 +182,7 @@ def wallet_withdraw():
 def orders():
     uid    = session["user_id"]
     status = request.args.get("status", "")
+    search = request.args.get("q", "").strip().lower()
     page   = int(request.args.get("page", 1))
 
     filters = {"buyer_id": uid}
@@ -187,6 +190,15 @@ def orders():
         filters["status"] = status
 
     all_orders = db_select("orders", "*", filters=filters, order="-created_at")
+    for o in all_orders:
+        o["order_items"] = db_select("order_items", "title", filters={"order_id": o["id"]})
+
+    if search:
+        all_orders = [o for o in all_orders if
+                      search in o["id"].lower()
+                      or search in (o.get("order_number") or "").lower()
+                      or any(search in (it.get("title") or "").lower() for it in o["order_items"])]
+
     per_page   = 20
     total      = len(all_orders)
     start      = (page - 1) * per_page
@@ -194,7 +206,7 @@ def orders():
     pages      = max(1, -(-total // per_page))
 
     return render_template("dashboard/orders.html",
-        orders=paginated, status=status, page=page, pages=pages, total=total)
+        orders=paginated, status=status, search=search, page=page, pages=pages, total=total)
 
 
 # ── Purchases (with download links) ──────────────────────────
@@ -216,7 +228,7 @@ def purchases():
 
     # Enrich with order items
     for order in paginated:
-        order["items"] = db_select("order_items", "*", filters={"order_id": order["id"]})
+        order["order_items"] = db_select("order_items", "*", filters={"order_id": order["id"]})
 
     return render_template("dashboard/purchases.html",
         orders=paginated, page=page, pages=pages, total=total)

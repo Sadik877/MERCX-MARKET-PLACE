@@ -61,6 +61,7 @@ def search():
     sort       = request.args.get("sort", "relevance")
     min_price  = request.args.get("min_price", "")
     max_price  = request.args.get("max_price", "")
+    min_rating = request.args.get("min_rating", "")
     page       = int(request.args.get("page", 1))
     per_page   = 20
 
@@ -90,6 +91,12 @@ def search():
                         continue
                 except (ValueError, TypeError):
                     pass
+            if min_rating:
+                try:
+                    if float(listing.get("rating") or 0) < float(min_rating):
+                        continue
+                except (ValueError, TypeError):
+                    pass
             results.append(listing)
 
         # Sort
@@ -113,6 +120,7 @@ def search():
     return render_template("marketplace/search.html",
         results=paginated, q=q, category=category,
         sort=sort, min_price=min_price, max_price=max_price,
+        min_rating=min_rating,
         total=total, page=page, pages=pages,
         categories=categories,
     )
