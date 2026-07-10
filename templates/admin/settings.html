@@ -2,6 +2,7 @@
 {% block title %}Site Settings — Admin{% endblock %}
 {% block page_content %}
 <h1 class="font-display text-2xl font-bold mb-6">Site Settings</h1>
+{% if settings %}
 <form method="POST" action="{{ url_for('admin.settings') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -24,4 +25,10 @@
     <i data-feather="save" style="width:17px;height:17px"></i> Save All Settings
   </button>
 </form>
+{% else %}
+<div class="card" style="text-align:center;padding:4rem">
+  <i data-feather="settings" style="width:44px;height:44px;color:var(--text-dim);margin-bottom:1rem"></i>
+  <p style="color:var(--text-muted)">No site settings configured yet.</p>
+</div>
+{% endif %}
 {% endblock %}

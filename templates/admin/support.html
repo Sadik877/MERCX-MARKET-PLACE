@@ -9,11 +9,12 @@
 </div>
 <div class="card" style="padding:0;overflow:hidden">
   {% if tickets %}
+  <div class="table-wrap" style="border:none">
   <table class="table">
     <thead><tr><th>Ticket</th><th>Subject</th><th>User</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead>
     <tbody>
     {% for t in tickets %}
-    <tr>
+    <tr style="cursor:pointer" onclick="location.href='{{ url_for('admin.ticket_detail', ticket_id=t.id) }}'">
       <td class="font-mono text-xs" style="color:var(--primary-light)">{{ t.ticket_number }}</td>
       <td class="text-sm">{{ t.subject }}</td>
       <td style="font-size:.85rem">{{ t.user.username if t.user else '—' }}</td>
@@ -24,8 +25,12 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
-  <div style="text-align:center;padding:3rem"><p style="color:var(--text-muted)">No tickets.</p></div>
+  <div style="text-align:center;padding:3rem">
+    <i data-feather="headphones" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
+    <p style="color:var(--text-muted)">No tickets in this category.</p>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

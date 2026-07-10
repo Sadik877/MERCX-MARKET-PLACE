@@ -5,6 +5,7 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
   <div class="lg:col-span-2">
     <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap" style="border:none">
       <table class="table">
         <thead><tr><th>Code</th><th>Discount</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
         <tbody>
@@ -25,6 +26,13 @@
         {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% if not coupons %}
+      <div style="text-align:center;padding:3rem">
+        <i data-feather="tag" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
+        <p style="color:var(--text-muted)">No coupons yet. Create your first one.</p>
+      </div>
+      {% endif %}
     </div>
   </div>
   <div class="card">

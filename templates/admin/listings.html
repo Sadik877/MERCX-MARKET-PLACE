@@ -18,7 +18,7 @@
   </form>
 </div>
 
-<div class="card" style="padding:0;overflow:hidden">
+<div class="card hidden lg:block" style="padding:0;overflow:hidden">
   {% if listings %}
   <div class="table-wrap" style="border:none">
     <table class="table">
@@ -95,4 +95,46 @@
   </div>
   {% endif %}
 </div>
+
+<!-- Mobile cards -->
+{% if listings %}
+<div class="lg:hidden space-y-3">
+  {% set sc = {'active':'success','pending':'warning','rejected':'danger','paused':'neutral','deleted':'danger'} %}
+  {% for l in listings %}
+  <div class="card">
+    <div class="flex items-center justify-between mb-2">
+      <div class="font-semibold text-sm truncate" style="color:var(--text);max-width:180px">{{ l.title }}</div>
+      <span class="badge badge-{{ sc.get(l.status,'neutral') }}">{{ l.status }}</span>
+    </div>
+    <div style="font-size:.78rem;color:var(--text-dim)">{{ l.seller.username if l.seller else '—' }} · ${{ '%.2f'|format(l.price|float) }} · {{ l.sales_count or 0 }} sales</div>
+    <div class="flex gap-2 mt-3 flex-wrap">
+      {% if l.status == 'pending' %}
+      <form method="POST" action="{{ url_for('admin.approve_listing', listing_id=l.id) }}" style="flex:1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm w-full justify-center" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">Approve</button>
+      </form>
+      <button onclick="document.getElementById('reject-m-{{ l.id }}').classList.toggle('hidden')" class="btn btn-sm" style="flex:1;background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">Reject</button>
+      {% endif %}
+    </div>
+    <div id="reject-m-{{ l.id }}" class="hidden mt-2">
+      <form method="POST" action="{{ url_for('admin.reject_listing', listing_id=l.id) }}" class="flex gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="reason" class="input" style="flex:1" placeholder="Rejection reason…" required>
+        <button type="submit" class="btn btn-danger btn-sm">Send</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+  {% if pages > 1 %}
+  <div class="flex justify-center pt-2">
+    <div class="pagination">
+      {% for p in range(1, pages+1) %}
+      <a href="{{ url_for('admin.listings', status=status, q=search, page=p) }}"
+         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}

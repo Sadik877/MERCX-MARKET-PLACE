@@ -9,6 +9,7 @@
 </div>
 <div class="card" style="padding:0;overflow:hidden">
   {% if reports %}
+  <div class="table-wrap" style="border:none">
   <table class="table">
     <thead><tr><th>Listing</th><th>Reporter</th><th>Reason</th><th>Details</th><th>Date</th><th>Action</th></tr></thead>
     <tbody>
@@ -37,8 +38,12 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
-  <div style="text-align:center;padding:3rem"><p style="color:var(--text-muted)">No reports.</p></div>
+  <div style="text-align:center;padding:3rem">
+    <i data-feather="flag" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
+    <p style="color:var(--text-muted)">No reports in this category.</p>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

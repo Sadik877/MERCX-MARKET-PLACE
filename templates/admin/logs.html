@@ -1,21 +1,44 @@
 {% extends 'admin/base.html' %}
-{% block title %}Audit Logs — Admin{% endblock %}
+{% block title %}Activity Log — Admin{% endblock %}
 {% block page_content %}
-<h1 class="font-display text-2xl font-bold mb-5">Audit Logs <span style="color:var(--text-muted);font-weight:400;font-size:1rem">({{ total }})</span></h1>
-<form action="{{ url_for('admin.logs') }}" method="GET" class="mb-5">
-  <input type="text" name="action" class="input" style="width:260px" placeholder="Filter by action…" value="{{ action_f }}">
-</form>
-<div class="card" style="padding:0;overflow:hidden">
+<div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+  <div>
+    <h1 class="font-display text-2xl font-bold">Admin Activity Log</h1>
+    <p style="font-size:.82rem;color:var(--text-muted)">{{ total }} event{{ 's' if total != 1 }} · every sensitive admin & login action is recorded here</p>
+  </div>
+</div>
+
+<div class="flex flex-wrap items-center gap-2 mb-5">
+  {% for val, label in [('','All'),('login','Logins'),('ban_user','Bans'),('set_role','Role Changes'),('approve_','Approvals'),('reject_','Rejections'),('refund_order','Refunds')] %}
+  <a href="{{ url_for('admin.logs', action=val) }}" class="tab {% if action_f == val %}active{% endif %}" style="border-radius:99px;padding:.4rem 1rem">{{ label }}</a>
+  {% endfor %}
+  <form action="{{ url_for('admin.logs') }}" method="GET" class="ml-auto">
+    <input type="text" name="action" class="input" style="width:220px" placeholder="Search action…" value="{{ action_f }}">
+  </form>
+</div>
+
+{% if logs %}
+<!-- Desktop table -->
+<div class="card hidden lg:block" style="padding:0;overflow:hidden">
   <table class="table">
-    <thead><tr><th>User</th><th>Action</th><th>Resource</th><th>IP</th><th>Date</th></tr></thead>
+    <thead><tr><th>Actor</th><th>Action</th><th>Resource</th><th>IP Address</th><th>Browser / Device</th><th>Date</th></tr></thead>
     <tbody>
     {% for l in logs %}
+    {% set ac = 'danger' if l.action in ('ban_user','admin_delete_listing','reject_listing') else ('warning' if 'reject' in l.action else ('success' if 'approve' in l.action or l.action=='login' else 'neutral')) %}
     <tr>
-      <td style="font-size:.85rem">{{ l.user.username if l.get('user') else 'System' }}</td>
-      <td><span class="badge badge-neutral">{{ l.action }}</span></td>
+      <td style="font-size:.85rem">
+        {% if l.user %}
+        <a href="{{ url_for('admin.user_detail', user_id=l.user.id) }}" style="color:var(--primary-light);font-weight:600">{{ l.user.username }}</a>
+        <span class="badge badge-neutral" style="font-size:.62rem;margin-left:.3rem">{{ l.user.role }}</span>
+        {% else %}System{% endif %}
+      </td>
+      <td><span class="badge badge-{{ ac }}">{{ l.action }}</span></td>
       <td style="font-size:.8rem;color:var(--text-muted)">{{ l.resource_type or '—' }}</td>
       <td style="font-size:.78rem;color:var(--text-dim);font-family:monospace">{{ l.ip_address or '—' }}</td>
-      <td style="font-size:.8rem;color:var(--text-muted)">{{ l.created_at[:19].replace('T',' ') }}</td>
+      <td style="font-size:.78rem;color:var(--text-muted)">
+        {% if l.ua_info %}{{ l.ua_info.browser }} · {{ l.ua_info.os }} · {{ l.ua_info.device }}{% else %}—{% endif %}
+      </td>
+      <td style="font-size:.8rem;color:var(--text-muted);white-space:nowrap" data-relative-time="{{ l.created_at }}">{{ l.created_at[:16].replace('T',' ') }}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -30,4 +53,30 @@
   </div>
   {% endif %}
 </div>
+
+<!-- Mobile cards -->
+<div class="lg:hidden space-y-3">
+  {% for l in logs %}
+  {% set ac = 'danger' if l.action in ('ban_user','admin_delete_listing','reject_listing') else ('warning' if 'reject' in l.action else ('success' if 'approve' in l.action or l.action=='login' else 'neutral')) %}
+  <div class="card">
+    <div class="flex items-center justify-between mb-2">
+      <span style="font-size:.85rem;font-weight:600">{{ l.user.username if l.user else 'System' }}</span>
+      <span class="badge badge-{{ ac }}">{{ l.action }}</span>
+    </div>
+    <div style="font-size:.78rem;color:var(--text-dim);font-family:monospace">{{ l.ip_address or '—' }}
+      {% if l.ua_info %} · {{ l.ua_info.browser }} · {{ l.ua_info.device }}{% endif %}</div>
+    <div style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem" data-relative-time="{{ l.created_at }}">{{ l.created_at[:16].replace('T',' ') }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:4rem">
+  <i data-feather="file-text" style="width:44px;height:44px;color:var(--text-dim);margin-bottom:1rem"></i>
+  <p style="color:var(--text-muted)">No activity matches this filter.</p>
+</div>
+{% endif %}
+
+<!-- TODO: Country detection would require an IP geolocation lookup (e.g. MaxMind
+     GeoLite2 or a geo-IP API) which isn't wired into this project. Browser/OS/device
+     above are parsed from the User-Agent string with no external calls needed. -->
 {% endblock %}

@@ -19,16 +19,30 @@
       {{ pending_approval }} Listings to Review
     </a>
     {% endif %}
+    {% if pending_reports %}
+    <a href="{{ url_for('admin.reports') }}" class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#FCA5A5">
+      <i data-feather="flag" style="width:14px;height:14px"></i>
+      {{ pending_reports }} Reports
+    </a>
+    {% endif %}
+    {% if open_tickets %}
+    <a href="{{ url_for('admin.support') }}" class="btn btn-sm" style="background:rgba(6,182,212,.12);border:1px solid rgba(6,182,212,.3);color:#67e8f9">
+      <i data-feather="headphones" style="width:14px;height:14px"></i>
+      {{ open_tickets }} Open Tickets
+    </a>
+    {% endif %}
   </div>
 </div>
 
 <!-- Stats -->
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+<div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
   {% for val, label, icon, color, bg in [
     (total_users,      'Total Users',    'users',         '#7C3AED','rgba(124,58,237,.12)'),
     (total_sellers,    'Sellers',        'store',         '#06B6D4','rgba(6,182,212,.12)'),
     (total_listings,   'Live Products',  'package',       '#10B981','rgba(16,185,129,.12)'),
+    (total_orders,     'Total Orders',   'shopping-bag',  '#EC4899','rgba(236,72,153,.12)'),
     ('$'~'%.2f'|format(total_revenue|float),'Revenue','dollar-sign','#F59E0B','rgba(245,158,11,.12)'),
+    ('$'~'%.2f'|format(platform_fees|float),'Platform Fees','percent','#8B5CF6','rgba(139,92,246,.12)'),
   ] %}
   <div class="stat-card reveal">
     <div class="stat-icon" style="background:{{ bg }};color:{{ color }}">
