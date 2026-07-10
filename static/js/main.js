@@ -393,6 +393,110 @@ function initConfirmForms() {
 }
 
 
+/* ── Styled Confirm Modal (delete confirmations) ────────────── */
+function initConfirmModal() {
+  const modal = document.getElementById('confirm-modal');
+  if (!modal) return;
+  const titleEl = document.getElementById('confirm-modal-title');
+  const bodyEl  = document.getElementById('confirm-modal-body');
+  const okBtn   = document.getElementById('confirm-modal-ok');
+  let pendingForm = null;
+
+  document.addEventListener('click', e => {
+    const trigger = e.target.closest('[data-confirm-modal]');
+    if (!trigger) return;
+    e.preventDefault();
+    pendingForm = trigger.closest('form') || null;
+    titleEl.textContent = trigger.dataset.confirmTitle || 'Are you sure?';
+    bodyEl.textContent  = trigger.dataset.confirmModal || 'This action cannot be undone.';
+    modal.classList.remove('hidden');
+  });
+
+  okBtn?.addEventListener('click', () => {
+    modal.classList.add('hidden');
+    if (pendingForm) pendingForm.submit();
+    pendingForm = null;
+  });
+
+  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+  document.getElementById('confirm-modal-cancel')?.addEventListener('click', () => modal.classList.add('hidden'));
+}
+
+
+/* ── Grid / List View Toggle ─────────────────────────────────── */
+function initViewToggle() {
+  const toggle = document.querySelector('[data-view-toggle]');
+  const container = document.getElementById('product-list');
+  if (!toggle || !container) return;
+  const KEY = 'mercx_product_view';
+  const saved = localStorage.getItem(KEY) || 'grid';
+  applyView(saved);
+
+  toggle.addEventListener('click', e => {
+    const btn = e.target.closest('[data-view]');
+    if (!btn) return;
+    applyView(btn.dataset.view);
+    localStorage.setItem(KEY, btn.dataset.view);
+  });
+
+  function applyView(view) {
+    container.classList.toggle('view-list', view === 'list');
+    container.classList.toggle('view-grid', view !== 'list');
+    toggle.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  }
+}
+
+
+/* ── Bulk Product Actions ────────────────────────────────────── */
+function initBulkActions() {
+  const bar = document.getElementById('bulk-bar');
+  const countEl = document.getElementById('bulk-count');
+  const selectAll = document.getElementById('bulk-select-all');
+  if (!bar) return;
+
+  function checkboxes() { return Array.from(document.querySelectorAll('.bulk-checkbox')); }
+  function selected() { return checkboxes().filter(c => c.checked); }
+
+  function refresh() {
+    const n = selected().length;
+    bar.classList.toggle('hidden', n === 0);
+    if (countEl) countEl.textContent = n;
+  }
+
+  document.addEventListener('change', e => {
+    if (e.target.classList.contains('bulk-checkbox')) refresh();
+  });
+
+  selectAll?.addEventListener('change', () => {
+    checkboxes().forEach(c => { c.checked = selectAll.checked; });
+    refresh();
+  });
+
+  document.querySelectorAll('[data-bulk-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const ids = selected().map(c => c.value);
+      if (!ids.length) return;
+      const action = btn.dataset.bulkAction; // url template containing {id}
+      if (!confirm(`Apply "${btn.textContent.trim()}" to ${ids.length} product(s)?`)) return;
+      btn.disabled = true;
+      const csrf = getCsrf();
+      for (const id of ids) {
+        try {
+          await fetch(action.replace('{id}', id), {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `csrf_token=${encodeURIComponent(csrf)}`
+          });
+        } catch (err) { console.error('Bulk action failed for', id, err); }
+      }
+      location.reload();
+    });
+  });
+
+  refresh();
+}
+
+
 /* ── Dropdown Menus ─────────────────────────────────────────── */
 function initDropdowns() {
   document.addEventListener('click', e => {
@@ -415,15 +519,25 @@ function initTabs() {
   document.querySelectorAll('[data-tab-group]').forEach(group => {
     const tabs    = group.querySelectorAll('[data-tab]');
     const panels  = group.querySelectorAll('[data-panel]');
+
+    function activate(tab) {
+      tabs.forEach(t => t.classList.remove('active'));
+      panels.forEach(p => p.classList.add('hidden'));
+      tab.classList.add('active');
+      const panel = group.querySelector(`[data-panel="${tab.dataset.tab}"]`);
+      panel?.classList.remove('hidden');
+    }
+
     tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('active'));
-        panels.forEach(p => p.classList.add('hidden'));
-        tab.classList.add('active');
-        const panel = group.querySelector(`[data-panel="${tab.dataset.tab}"]`);
-        panel?.classList.remove('hidden');
-      });
+      tab.addEventListener('click', () => activate(tab));
     });
+
+    // Support deep-linking via URL hash, e.g. /settings#password
+    const hash = location.hash.replace('#', '');
+    if (hash) {
+      const match = Array.from(tabs).find(t => t.dataset.tab === hash);
+      if (match) activate(match);
+    }
   });
 }
 
@@ -448,6 +562,112 @@ function initFaq() {
       }
     });
   });
+}
+
+
+/* ── Mobile Filter Drawer ───────────────────────────────────── */
+function initFilterDrawer() {
+  const openBtn  = document.getElementById('filter-drawer-open');
+  const drawer   = document.getElementById('filter-drawer');
+  const backdrop = document.getElementById('filter-drawer-backdrop');
+  const closeBtn = document.getElementById('filter-drawer-close');
+  if (!openBtn || !drawer || !backdrop) return;
+
+  function open()  { drawer.classList.remove('hidden'); backdrop.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
+  function close() { drawer.classList.add('hidden'); backdrop.classList.add('hidden'); document.body.style.overflow = ''; }
+
+  openBtn.addEventListener('click', open);
+  closeBtn?.addEventListener('click', close);
+  backdrop.addEventListener('click', close);
+}
+
+
+/* ── Quick View Modal ───────────────────────────────────────── */
+function initQuickView() {
+  const modal = document.getElementById('quick-view-modal');
+  if (!modal) return;
+  const body = document.getElementById('quick-view-body');
+
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-quick-view]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const d = btn.dataset;
+    body.innerHTML = `
+      <img src="${d.image || ''}" class="quick-view-img" alt="${d.title}" onerror="this.style.display='none'">
+      <div>
+        <h3 class="font-display font-bold text-xl mb-2">${d.title}</h3>
+        <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.75rem;font-size:.85rem;color:var(--text-muted)">
+          <span style="color:#F59E0B">★</span> ${d.rating} <span style="color:var(--text-dim)">(${d.reviews} reviews)</span>
+        </div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.5rem;color:var(--primary-light);margin-bottom:1.25rem">$${d.price}</div>
+        <a href="${d.href}" class="btn btn-primary w-full justify-center">View Full Details</a>
+      </div>`;
+    modal.classList.remove('hidden');
+    if (window.feather) feather.replace({ 'stroke-width': 1.75 });
+  });
+
+  document.getElementById('quick-view-close')?.addEventListener('click', () => modal.classList.add('hidden'));
+  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+}
+
+
+/* ── Recent Searches (localStorage) ─────────────────────────── */
+function initRecentSearches() {
+  const form  = document.getElementById('search-form');
+  const list  = document.getElementById('recent-searches');
+  if (!list) return;
+  const KEY = 'mercx_recent_searches';
+
+  function render() {
+    let recent = [];
+    try { recent = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch {}
+    if (!recent.length) { list.innerHTML = ''; list.classList.add('hidden'); return; }
+    list.classList.remove('hidden');
+    list.innerHTML = recent.map(q => `<button type="button" class="search-chip" data-recent-q="${q}">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      ${q}</button>`).join('');
+  }
+
+  list.addEventListener('click', e => {
+    const chip = e.target.closest('[data-recent-q]');
+    if (!chip) return;
+    const input = form?.querySelector('input[name="q"]');
+    if (input) { input.value = chip.dataset.recentQ; form.submit(); }
+  });
+
+  form?.addEventListener('submit', () => {
+    const q = form.querySelector('input[name="q"]')?.value.trim();
+    if (!q) return;
+    let recent = [];
+    try { recent = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch {}
+    recent = [q, ...recent.filter(x => x.toLowerCase() !== q.toLowerCase())].slice(0, 6);
+    localStorage.setItem(KEY, JSON.stringify(recent));
+  });
+
+  render();
+}
+
+
+/* ── Relative Timestamps ─────────────────────────────────────── */
+function initRelativeTime() {
+  const els = document.querySelectorAll('[data-relative-time]');
+  if (!els.length) return;
+
+  function relativeTime(iso) {
+    const then = new Date(iso).getTime();
+    if (isNaN(then)) return '';
+    const diff = Math.floor((Date.now() - then) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+    if (diff < 2592000) return Math.floor(diff / 604800) + 'w ago';
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  els.forEach(el => { el.textContent = relativeTime(el.dataset.relativeTime); });
 }
 
 
@@ -476,6 +696,13 @@ document.addEventListener('DOMContentLoaded', () => {
   initDropdowns();
   initTabs();
   initFaq();
+  initFilterDrawer();
+  initQuickView();
+  initRecentSearches();
+  initConfirmModal();
+  initViewToggle();
+  initBulkActions();
+  initRelativeTime();
 
   // Refresh badges if logged in
   const isLoggedIn = document.body.dataset.loggedIn === 'true';
