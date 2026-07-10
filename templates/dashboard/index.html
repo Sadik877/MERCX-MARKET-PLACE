@@ -6,9 +6,16 @@
     <h1 class="font-display text-2xl font-bold">Welcome back, {{ current_username }} 👋</h1>
     <p style="color:var(--text-muted);font-size:.9rem">Here's what's happening with your account.</p>
   </div>
-  <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary btn-sm">
-    <i data-feather="shopping-bag" style="width:15px;height:15px"></i> Browse Products
-  </a>
+  <div class="flex gap-2">
+    {% if unread_notifications > 0 %}
+    <a href="{{ url_for('dashboard.notifications') }}" class="btn btn-ghost btn-sm">
+      <i data-feather="bell" style="width:15px;height:15px"></i> {{ unread_notifications }} New
+    </a>
+    {% endif %}
+    <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary btn-sm">
+      <i data-feather="shopping-bag" style="width:15px;height:15px"></i> Browse Products
+    </a>
+  </div>
 </div>
 
 <!-- Balance card -->
@@ -29,7 +36,7 @@
 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
   {% set stats = [
     ('shopping-bag', 'Total Spent',    '$'~'%.2f'|format(total_spent|float),   '#7C3AED', 'rgba(124,58,237,.12)'),
-    ('download',     'Downloads',      purchases|length,                         '#06B6D4', 'rgba(6,182,212,.12)'),
+    ('download',     'Downloads',      total_purchases,                         '#06B6D4', 'rgba(6,182,212,.12)'),
     ('heart',        'Wishlist',       wishlist_count,                           '#EF4444', 'rgba(239,68,68,.12)'),
     ('trending-up',  'Total Earned',   '$'~'%.2f'|format(total_earned|float),   '#10B981', 'rgba(16,185,129,.12)'),
   ] %}

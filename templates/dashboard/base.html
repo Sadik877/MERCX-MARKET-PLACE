@@ -71,6 +71,25 @@
 
   <!-- ── Main content ───────────────────────────────────── -->
   <main style="flex:1;padding:1.75rem;overflow-x:hidden;min-width:0">
+    <!-- Mobile sub-nav (visible below lg, where the sidebar is hidden) -->
+    <div class="subnav-scroll lg:hidden mb-5">
+      {% set mnav = [
+        ('dashboard.index',        'layout',       'Overview'),
+        ('dashboard.wallet',       'credit-card',  'Wallet'),
+        ('dashboard.orders',       'package',      'Orders'),
+        ('dashboard.purchases',    'download',     'Downloads'),
+        ('dashboard.messages',     'message-circle','Messages'),
+        ('dashboard.notifications','bell',         'Notifications'),
+        ('dashboard.wishlist',     'heart',        'Wishlist'),
+        ('dashboard.referrals',    'gift',         'Referrals'),
+        ('dashboard.settings',     'settings',     'Settings'),
+      ] %}
+      {% for endpoint, icon, label in mnav %}
+      <a href="{{ url_for(endpoint) }}" class="sidebar-link {% if request.endpoint == endpoint %}active{% endif %}">
+        <i data-feather="{{ icon }}" class="icon" style="width:14px;height:14px"></i>{{ label }}
+      </a>
+      {% endfor %}
+    </div>
     {% block page_content %}{% endblock %}
   </main>
 </div>

@@ -6,10 +6,13 @@
     <h1 class="font-display text-2xl font-bold">My Downloads</h1>
     <p style="color:var(--text-muted);font-size:.88rem">{{ total }} purchase{{ 's' if total != 1 }} · digital files ready to download</p>
   </div>
+  {% if orders %}
+  <input type="text" id="purchase-search" class="input" style="width:220px" placeholder="Search your downloads…">
+  {% endif %}
 </div>
 {% if orders %}
   {% for order in orders %}
-  <div class="card mb-4 reveal">
+  <div class="card mb-4 reveal" data-order-titles="{{ order.order_items|map(attribute='title')|join(' ')|lower }}">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <span class="font-mono text-sm font-semibold" style="color:var(--primary-light)">{{ order.order_number }}</span>
@@ -17,7 +20,7 @@
       </div>
       <span class="badge badge-success">Completed</span>
     </div>
-    {% for item in order.items %}
+    {% for item in order.order_items %}
     <div class="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl mb-2"
          style="background:var(--bg-surface);border:1px solid var(--border)">
       <div class="flex items-center gap-4">
@@ -76,4 +79,12 @@
   <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary">Browse Marketplace</a>
 </div>
 {% endif %}
+<script>
+document.getElementById('purchase-search')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('[data-order-titles]').forEach(card => {
+    card.style.display = card.dataset.orderTitles.includes(q) ? '' : 'none';
+  });
+});
+</script>
 {% endblock %}

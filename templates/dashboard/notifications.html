@@ -33,7 +33,7 @@
           {% endif %}
         </div>
         <p style="font-size:.83rem;color:var(--text-muted);margin-top:.2rem;line-height:1.5">{{ n.message }}</p>
-        <p style="font-size:.75rem;color:var(--text-dim);margin-top:.35rem">{{ n.created_at[:16].replace('T',' ') }}</p>
+        <p style="font-size:.75rem;color:var(--text-dim);margin-top:.35rem" data-relative-time="{{ n.created_at }}">{{ n.created_at[:16].replace('T',' ') }}</p>
       </div>
       {% if n.link %}
       <a href="{{ n.link }}" class="btn btn-ghost btn-sm flex-shrink-0" onclick="event.stopPropagation()">View</a>
