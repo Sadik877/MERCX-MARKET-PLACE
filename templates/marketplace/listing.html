@@ -46,6 +46,7 @@
           <button data-tab="description" class="tab active">Description</button>
           <button data-tab="details" class="tab">Product Details</button>
           <button data-tab="reviews" class="tab">Reviews ({{ listing.review_count or 0 }})</button>
+          <button data-tab="faq" class="tab">FAQ</button>
         </div>
 
         <!-- Description -->
@@ -92,6 +93,26 @@
             </div>
           </div>
           {% endif %}
+
+          <!-- What's Included -->
+          <div class="mt-5 pt-5" style="border-top:1px solid var(--border)">
+            <h4 class="font-display font-bold mb-3" style="font-size:.95rem">What's Included</h4>
+            <div class="space-y-2">
+              {% set included = [
+                ('Full ' ~ (listing.license_type|default('personal','true')) ~ ' license', true),
+                ((listing.file_format|join(', ')|title ~ ' files') if listing.file_format else 'Digital files', true),
+                ('Free updates', listing.updates_included),
+                ('Direct support (' ~ listing.support_duration_days ~ ' days)' if listing.support_included and listing.support_duration_days else 'Direct seller support', listing.support_included),
+                ('Instant download after purchase', listing.delivery_type == 'instant'),
+              ] %}
+              {% for text, has_it in included %}
+              <div class="flex items-center gap-2">
+                <i data-feather="{{ 'check' if has_it else 'x' }}" style="width:14px;height:14px;flex-shrink:0;color:{{ 'var(--success)' if has_it else 'var(--text-dim)' }}"></i>
+                <span style="font-size:.85rem;color:{{ 'var(--text)' if has_it else 'var(--text-dim)' }}">{{ text }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
         </div>
 
         <!-- Reviews -->
@@ -187,6 +208,27 @@
           </div>
           {% endif %}
         </div>
+
+        <!-- FAQ -->
+        <div data-panel="faq" style="padding:1.5rem;display:none">
+          <div class="space-y-3" data-faq-group>
+            {% set listing_faqs = [
+              ('How and when will I receive this product?', 'Delivery is ' ~ (listing.delivery_type|default('instant','true')) ~ '. ' ~ ('Files are available immediately after checkout from your Purchases page.' if listing.delivery_type == 'instant' else 'The seller will deliver your files manually after purchase.')),
+              ('What license do I get?', 'This purchase includes a ' ~ (listing.license_type|default('personal','true')) ~ ' license' ~ (', with free updates included.' if listing.updates_included else '.')),
+              ('What if I have an issue with the download?', 'You can message the seller directly, or open a dispute from your order if the issue can’t be resolved — our support team can review it and issue a refund when appropriate.'),
+              ('Can I get a refund?', 'Refunds are handled through our dispute process on a case-by-case basis, based on whether the delivered product matches the listing.'),
+            ] %}
+            {% for question, answer in listing_faqs %}
+            <div class="faq-item">
+              <div class="faq-question">
+                <span>{{ question }}</span>
+                <i data-feather="chevron-down" class="faq-chevron" style="width:16px;height:16px"></i>
+              </div>
+              <div class="faq-answer"><div class="faq-answer__inner">{{ answer }}</div></div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -235,10 +277,17 @@
             <i data-feather="heart" style="width:15px;height:15px{% if in_wishlist %};fill:#EF4444;stroke:#EF4444{% endif %}"></i>
             {{ 'Wishlisted' if in_wishlist else 'Wishlist' }}
           </button>
-          <button onclick="navigator.share({title:'{{ listing.title }}',url:window.location.href}).catch(()=>{})"
-                  class="btn btn-ghost p-3">
-            <i data-feather="share-2" style="width:15px;height:15px"></i>
-          </button>
+          <div class="relative">
+            <button onclick="document.getElementById('share-dropdown-{{ listing.id }}').classList.toggle('hidden')" class="btn btn-ghost p-3">
+              <i data-feather="share-2" style="width:15px;height:15px"></i>
+            </button>
+            <div id="share-dropdown-{{ listing.id }}" class="dropdown hidden" style="right:0;min-width:170px">
+              <a href="https://twitter.com/intent/tweet?url={{ request.url|urlencode }}&text={{ listing.title|urlencode }}" target="_blank" rel="noopener" class="dropdown-item"><i data-feather="twitter" style="width:14px;height:14px"></i> Twitter / X</a>
+              <a href="https://www.facebook.com/sharer/sharer.php?u={{ request.url|urlencode }}" target="_blank" rel="noopener" class="dropdown-item"><i data-feather="facebook" style="width:14px;height:14px"></i> Facebook</a>
+              <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ request.url|urlencode }}" target="_blank" rel="noopener" class="dropdown-item"><i data-feather="linkedin" style="width:14px;height:14px"></i> LinkedIn</a>
+              <button data-copy="{{ request.url }}" class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer"><i data-feather="link" style="width:14px;height:14px"></i> Copy Link</button>
+            </div>
+          </div>
         </div>
         {% else %}
         <a href="{{ url_for('auth.login', next=request.path) }}" class="btn btn-primary w-full justify-center btn-lg mb-2">
@@ -246,9 +295,13 @@
         </a>
         {% endif %}
 
-        <!-- Trust badges -->
+        <!-- Buyer Protection -->
         <div class="mt-4 pt-4" style="border-top:1px solid var(--border)">
-          {% for icon, text in [('shield','Secure checkout'),('download','Instant delivery'),('refresh-cw','Lifetime updates' if listing.updates_included else 'Single download'),('headphones','Support included' if listing.support_included else 'Community support')] %}
+          <div class="flex items-center gap-2 mb-3">
+            <i data-feather="shield" style="width:15px;height:15px;color:var(--success)"></i>
+            <span style="font-size:.85rem;font-weight:700">MercX Buyer Protection</span>
+          </div>
+          {% for icon, text in [('lock','Secure, encrypted checkout'),('download','Instant delivery' if listing.delivery_type == 'instant' else 'Delivery within seller SLA'),('refresh-cw','Lifetime updates included' if listing.updates_included else 'Single-version download'),('life-buoy','Refund via dispute if not as described')] %}
           <div class="flex items-center gap-2 mb-2">
             <i data-feather="{{ icon }}" style="width:14px;height:14px;color:var(--success);flex-shrink:0"></i>
             <span style="font-size:.8rem;color:var(--text-muted)">{{ text }}</span>

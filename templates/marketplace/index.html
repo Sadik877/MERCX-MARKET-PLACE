@@ -9,8 +9,11 @@
       </h1>
       <p style="color:var(--text-muted);font-size:.88rem">{{ total }} products found</p>
     </div>
-    <!-- Sort -->
     <div class="flex items-center gap-3">
+      <!-- Mobile filters toggle -->
+      <button id="filter-drawer-open" class="btn btn-ghost btn-sm lg:hidden">
+        <i data-feather="sliders" style="width:14px;height:14px"></i> Filters
+      </button>
       <select onchange="location.href=this.value" class="input" style="width:auto">
         {% for val, label in [('popular','Most Popular'),('newest','Newest'),('price_low','Price: Low→High'),('price_high','Price: High→Low'),('rating','Top Rated')] %}
         <option value="{{ url_for('marketplace.index', sort=val, category=request.args.get('category','')) }}"
@@ -21,7 +24,7 @@
   </div>
 
   <div class="flex gap-5">
-    <!-- Sidebar filters -->
+    <!-- Sidebar filters (desktop) -->
     <aside style="width:220px;flex-shrink:0" class="hidden lg:block">
       <div class="card" style="position:sticky;top:80px">
         <h3 class="font-display font-semibold text-sm mb-3" style="color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Categories</h3>
@@ -43,23 +46,43 @@
       </div>
     </aside>
 
+    <!-- Mobile filter drawer -->
+    <div id="filter-drawer-backdrop" class="filter-drawer-backdrop hidden"></div>
+    <div id="filter-drawer" class="filter-drawer hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold">Categories</h3>
+        <button id="filter-drawer-close" class="btn btn-ghost btn-sm p-2"><i data-feather="x" style="width:16px;height:16px"></i></button>
+      </div>
+      <div class="space-y-1">
+        <a href="{{ url_for('marketplace.index', sort=sort) }}"
+           class="sidebar-link {% if not current_category %}active{% endif %}" style="margin:0;padding:.65rem .75rem">
+          All Products
+        </a>
+        {% for cat in categories %}
+        <a href="{{ url_for('marketplace.index', category=cat.slug, sort=sort) }}"
+           class="sidebar-link {% if current_category and current_category.id == cat.id %}active{% endif %}"
+           style="margin:0;padding:.65rem .75rem">
+          <span style="width:8px;height:8px;border-radius:50%;background:{{ cat.color or 'var(--primary)' }};display:inline-block;flex-shrink:0"></span>
+          {{ cat.name }}
+          <span class="ml-auto text-xs" style="color:var(--text-dim)">{{ cat.listing_count or 0 }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+
     <!-- Product grid -->
     <div style="flex:1;min-width:0">
       {% if listings %}
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {% for listing in listings %}
-        <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" class="product-card reveal" style="text-decoration:none">
+        <div class="product-card reveal">
+          <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" style="text-decoration:none;display:contents">
           {% if listing.preview_images %}
             <img src="{{ listing.preview_images[0] }}" class="product-card__img" loading="lazy" alt="{{ listing.title }}">
           {% else %}
             <div class="product-card__img-placeholder">
               <i data-feather="package" style="width:32px;height:32px;opacity:.3"></i>
             </div>
-          {% endif %}
-          {% if listing.is_featured %}
-          <div style="position:absolute;top:.5rem;left:.5rem">
-            <span class="badge badge-warning" style="font-size:.65rem">⭐ Featured</span>
-          </div>
           {% endif %}
           <div class="product-card__body">
             <div class="product-card__title">{{ listing.title }}</div>
@@ -77,6 +100,26 @@
               {% endif %}
             </div>
           </div>
+          </a>
+          <div class="product-card__badges">
+            {% if listing.is_featured %}<span class="badge badge-warning" style="font-size:.65rem">⭐ Featured</span>{% endif %}
+            {% if (listing.sales_count or 0) >= 20 %}<span class="badge badge-bestseller" style="font-size:.65rem">🔥 Bestseller</span>{% endif %}
+          </div>
+          <div class="product-card__quick">
+            <button type="button" class="product-card__icon-btn" title="Quick view"
+                    data-quick-view
+                    data-title="{{ listing.title }}"
+                    data-image="{{ listing.preview_images[0] if listing.preview_images else '' }}"
+                    data-price="{{ '%.2f'|format(listing.price|float) }}"
+                    data-rating="{{ '%.1f'|format(listing.rating|float) }}"
+                    data-reviews="{{ listing.review_count or 0 }}"
+                    data-href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}">
+              <i data-feather="eye" style="width:15px;height:15px"></i>
+            </button>
+            <button data-wishlist="{{ listing.id }}" class="product-card__icon-btn {% if listing.id in wishlist_ids %}active{% endif %}" title="Wishlist">
+              <i data-feather="heart" style="width:14px;height:14px{% if listing.id in wishlist_ids %};fill:#EF4444;stroke:#EF4444{% endif %}"></i>
+            </button>
+          </div>
           <div class="product-card__footer" onclick="event.stopPropagation()">
             <form method="POST" action="{{ url_for('marketplace.cart_add', listing_id=listing.id) }}" style="flex:1">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -84,12 +127,8 @@
                 <i data-feather="shopping-cart" style="width:13px;height:13px"></i> Add to Cart
               </button>
             </form>
-            <button data-wishlist="{{ listing.id }}" class="btn btn-ghost btn-sm p-2"
-                    style="color:{{ '#EF4444' if listing.id in [] else 'var(--text-muted)' }}">
-              <i data-feather="heart" style="width:14px;height:14px"></i>
-            </button>
           </div>
-        </a>
+        </div>
         {% endfor %}
       </div>
       <!-- Pagination -->
@@ -111,6 +150,17 @@
       </div>
       {% endif %}
     </div>
+  </div>
+</div>
+
+<!-- Quick View Modal -->
+<div id="quick-view-modal" class="modal-backdrop hidden">
+  <div class="modal" style="max-width:640px">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-bold text-lg">Quick View</h3>
+      <button id="quick-view-close" class="btn btn-ghost btn-sm p-2"><i data-feather="x" style="width:16px;height:16px"></i></button>
+    </div>
+    <div id="quick-view-body" class="quick-view-body"></div>
   </div>
 </div>
 {% endblock %}
