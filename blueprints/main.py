@@ -30,13 +30,16 @@ def index():
     # All categories
     categories = db_select("categories", filters={"is_active": True}, order="sort_order")
 
-    # Top sellers (by total sales)
+    # Top sellers (by total sales) — only sellers who've actually set up
+    # their store slug; store_slug is nullable, and a verified seller
+    # without one can't be linked to (url_for needs a real value).
     top_sellers = db_select(
         "user_profiles",
         "user_id,store_name,store_slug,avatar_url,seller_verified,seller_rating,total_sales",
         filters={"seller_verified": True},
-        order="-total_sales", limit=6
+        order="-total_sales", limit=12
     )
+    top_sellers = [s for s in top_sellers if s.get("store_slug")][:6]
 
     # Stats
     stats = {
