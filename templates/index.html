@@ -201,7 +201,7 @@
     <p style="color:var(--text-muted)">Verified creators trusted by thousands of buyers</p>
   </div>
   <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-    {% for seller in top_sellers %}
+    {% for seller in top_sellers if seller.store_slug %}
     <a href="{{ url_for('marketplace.seller_store', store_slug=seller.store_slug) }}" class="seller-card reveal" style="text-decoration:none">
       {% if seller.avatar_url %}
         <img src="{{ seller.avatar_url }}" alt="{{ seller.store_name }}" class="seller-card__avatar">
