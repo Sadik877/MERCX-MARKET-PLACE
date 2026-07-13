@@ -650,6 +650,39 @@ function initRecentSearches() {
 }
 
 
+/* ── Theme Toggle ───────────────────────────────────────────── */
+function initThemeToggle() {
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  const iconDark = document.getElementById('theme-icon-dark');
+  const iconLight = document.getElementById('theme-icon-light');
+  const KEY = 'mercx_theme';
+
+  function applyIcons(theme) {
+    if (iconDark) iconDark.style.display = theme === 'light' ? 'none' : '';
+    if (iconLight) iconLight.style.display = theme === 'light' ? '' : 'none';
+  }
+
+  // The inline <head> script already applied the saved theme before paint;
+  // this just syncs the icon and wires up the click handler.
+  applyIcons(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+
+  btn.addEventListener('click', () => {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    const next = isLight ? 'dark' : 'light';
+    if (next === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      document.documentElement.classList.add('dark');
+    }
+    localStorage.setItem(KEY, next);
+    applyIcons(next);
+  });
+}
+
+
 /* ── Relative Timestamps ─────────────────────────────────────── */
 function initRelativeTime() {
   const els = document.querySelectorAll('[data-relative-time]');
@@ -703,6 +736,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initViewToggle();
   initBulkActions();
   initRelativeTime();
+  initThemeToggle();
 
   // Refresh badges if logged in
   const isLoggedIn = document.body.dataset.loggedIn === 'true';

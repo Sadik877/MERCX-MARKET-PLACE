@@ -34,6 +34,37 @@
   --transition:    all .25s cubic-bezier(.4,0,.2,1);
 }
 
+/* ── Light Theme ────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --bg:            #F8FAFC;
+  --bg-card:       #FFFFFF;
+  --bg-surface:    #F1F5F9;
+  --bg-elevated:   #E2E8F0;
+  --primary:       #7C3AED;
+  --primary-light: #6D28D9;
+  --primary-glow:  rgba(124,58,237,.18);
+  --accent:        #0891B2;
+  --accent-glow:   rgba(8,145,178,.18);
+  --gold:          #D97706;
+  --success:       #059669;
+  --warning:       #D97706;
+  --danger:        #DC2626;
+  --text:          #0F172A;
+  --text-muted:    #475569;
+  --text-dim:      #94A3B8;
+  --border:        rgba(15,23,42,.08);
+  --border-strong: rgba(15,23,42,.16);
+  --shadow-lg:     0 20px 60px rgba(15,23,42,.12);
+  --shadow-glow:   0 0 40px var(--primary-glow);
+}
+:root[data-theme="light"] body { background: var(--bg); }
+:root[data-theme="light"] .hero-grid,
+:root[data-theme="light"] .hero-orb { opacity: .35; }
+
+body, .card, .navbar, .btn, .input {
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+}
+
 /* ── Base ───────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
