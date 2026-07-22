@@ -17,113 +17,108 @@
   </select>
 </div>
 
-<div class="card hidden lg:block" style="padding:0;overflow:hidden">
-  {% if transactions %}
-  <div class="table-wrap" style="border:none">
-    <table class="table">
-      <thead><tr><th>User</th><th>Type</th><th>Amount</th><th>Method</th><th>Reference</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>
-      {% for tx in transactions %}
-      {% set is_credit = tx.type in ('deposit','sale','refund','referral','bonus') %}
-      <tr>
-        <td>
-          <div class="font-semibold text-sm">{{ tx.user.username if tx.user else '—' }}</div>
-          <div style="font-size:.72rem;color:var(--text-dim)">{{ tx.user.email if tx.user else '' }}</div>
-        </td>
-        <td><span class="badge badge-{{ 'success' if is_credit else 'danger' }}">{{ tx.type }}</span></td>
-        <td class="font-semibold font-mono">${{ '%.2f'|format(tx.amount|float) }}</td>
-        <td style="font-size:.82rem;color:var(--text-muted)">{{ tx.payment_method or '—' }}</td>
-        <td style="font-size:.75rem;color:var(--text-dim);font-family:monospace">{{ tx.reference or '—' }}</td>
-        <td style="font-size:.8rem;color:var(--text-muted)">{{ tx.created_at[:16].replace('T',' ') }}</td>
-        <td><span class="badge badge-{{ 'success' if tx.status=='completed' else ('warning' if tx.status=='pending' else 'danger') }}">{{ tx.status }}</span></td>
-        <td>
-          {% if tx.status == 'pending' and current_role == 'admin' %}
-          <div class="flex gap-1">
-            <form method="POST" action="{{ url_for('admin.approve_wallet_tx', tx_id=tx.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
-                <i data-feather="check" style="width:13px;height:13px"></i>
-              </button>
-            </form>
-            <button onclick="document.getElementById('rej-{{ tx.id }}').classList.toggle('hidden')"
-                    class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
-              <i data-feather="x" style="width:13px;height:13px"></i>
-            </button>
-          </div>
-          <div id="rej-{{ tx.id }}" class="hidden mt-2">
-            <form method="POST" action="{{ url_for('admin.reject_wallet_tx', tx_id=tx.id) }}" class="flex gap-2">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="text" name="note" class="input" style="width:140px" placeholder="Reason">
-              <button type="submit" class="btn btn-danger btn-sm">Reject</button>
-            </form>
-          </div>
-          {% elif tx.status == 'pending' %}
-          <span style="font-size:.75rem;color:var(--text-dim)">Admin only</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% if pages > 1 %}
-  <div class="flex justify-center p-4">
-    <div class="pagination">
-      {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('admin.wallet', status=status_f, type=type_filter, page=p) }}" class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
-      {% endfor %}
-    </div>
+<form id="wallet-bulk-form" method="POST" action="{{ url_for('admin.bulk_approve_wallet') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if status_f == 'pending' %}
+  <div id="wallet-bulk-bar" class="bulk-bar hidden">
+    <label class="flex items-center gap-2 cursor-pointer" style="margin:0">
+      <input type="checkbox" id="wallet-select-all" class="w-4 h-4" style="accent-color:var(--primary)">
+      <span style="font-size:.85rem;font-weight:600;color:var(--text)"><span id="wallet-selected-count">0</span> selected</span>
+    </label>
+    <button type="submit" class="btn btn-sm ml-auto" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
+      <i data-feather="check-square" style="width:13px;height:13px"></i> Approve Selected
+    </button>
   </div>
   {% endif %}
-  {% else %}
-  <div style="text-align:center;padding:3rem"><p style="color:var(--text-muted)">No transactions found.</p></div>
-  {% endif %}
-</div>
 
-<!-- Mobile cards -->
-{% if transactions %}
-<div class="lg:hidden space-y-3">
-  {% for tx in transactions %}
-  {% set is_credit = tx.type in ('deposit','sale','refund','referral','bonus') %}
-  <div class="card">
-    <div class="flex items-center justify-between mb-2">
-      <div>
-        <div class="font-semibold text-sm">{{ tx.user.username if tx.user else '—' }}</div>
-        <span class="badge badge-{{ 'success' if is_credit else 'danger' }}" style="margin-top:.25rem">{{ tx.type }}</span>
+  <div class="card" style="padding:0;overflow:hidden">
+    {% if transactions %}
+    <div class="table-wrap responsive-cards" style="border:none">
+      <table class="table">
+        <thead><tr>
+          {% if status_f == 'pending' %}<th style="width:30px"></th>{% endif %}
+          <th>User</th><th>Type</th><th>Amount</th><th>Method</th><th>Reference</th><th>Date</th><th>Status</th><th>Action</th>
+        </tr></thead>
+        <tbody>
+        {% for tx in transactions %}
+        {% set is_credit = tx.type in ('deposit','sale','refund','referral','bonus') %}
+        <tr>
+          {% if status_f == 'pending' %}
+          <td data-label=""><input type="checkbox" name="tx_ids" class="wallet-bulk-checkbox w-4 h-4" value="{{ tx.id }}" style="accent-color:var(--primary)"></td>
+          {% endif %}
+          <td data-label="User">
+            <div class="font-semibold text-sm">{{ tx.user.username if tx.user else '—' }}</div>
+            <div style="font-size:.72rem;color:var(--text-dim)">{{ tx.user.email if tx.user else '' }}</div>
+          </td>
+          <td data-label="Type"><span class="badge badge-{{ 'success' if is_credit else 'danger' }}">{{ tx.type }}</span></td>
+          <td data-label="Amount" class="font-semibold font-mono">${{ '%.2f'|format(tx.amount|float) }}</td>
+          <td data-label="Method" style="font-size:.82rem;color:var(--text-muted)">{{ tx.payment_method or '—' }}</td>
+          <td data-label="Reference" style="font-size:.75rem;color:var(--text-dim);font-family:monospace">{{ tx.reference or '—' }}</td>
+          <td data-label="Date" style="font-size:.8rem;color:var(--text-muted)">{{ tx.created_at[:16].replace('T',' ') }}</td>
+          <td data-label="Status"><span class="badge badge-{{ 'success' if tx.status=='completed' else ('warning' if tx.status=='pending' else 'danger') }}">{{ tx.status }}</span></td>
+          <td data-label="Action">
+            {% if tx.status == 'pending' %}
+            <div class="flex gap-1">
+              <form method="POST" action="{{ url_for('admin.approve_wallet_tx', tx_id=tx.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
+                  <i data-feather="check" style="width:13px;height:13px"></i>
+                </button>
+              </form>
+              <button onclick="document.getElementById('rej-{{ tx.id }}').classList.toggle('hidden')"
+                      class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
+                <i data-feather="x" style="width:13px;height:13px"></i>
+              </button>
+            </div>
+            <div id="rej-{{ tx.id }}" class="hidden mt-2">
+              <form method="POST" action="{{ url_for('admin.reject_wallet_tx', tx_id=tx.id) }}" class="flex gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" name="note" class="input" style="width:140px" placeholder="Reason">
+                <button type="submit" class="btn btn-danger btn-sm">Reject</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pages > 1 %}
+    <div class="flex justify-center p-4">
+      <div class="pagination">
+        {% for p in range(1, pages+1) %}
+        <a href="{{ url_for('admin.wallet', status=status_f, type=type_filter, page=p) }}" class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+        {% endfor %}
       </div>
-      <span class="badge badge-{{ 'success' if tx.status=='completed' else ('warning' if tx.status=='pending' else 'danger') }}">{{ tx.status }}</span>
     </div>
-    <div class="flex items-center justify-between pt-2" style="border-top:1px solid var(--border)">
-      <span class="font-semibold font-mono">${{ '%.2f'|format(tx.amount|float) }}</span>
-      <span style="font-size:.75rem;color:var(--text-dim)">{{ tx.created_at[:10] }}</span>
-    </div>
-    {% if tx.status == 'pending' and current_role == 'admin' %}
-    <div class="flex gap-2 mt-3">
-      <form method="POST" action="{{ url_for('admin.approve_wallet_tx', tx_id=tx.id) }}" style="flex:1">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-sm w-full justify-center" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">Approve</button>
-      </form>
-      <button onclick="document.getElementById('rej-m-{{ tx.id }}').classList.toggle('hidden')" class="btn btn-sm" style="flex:1;background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">Reject</button>
-    </div>
-    <div id="rej-m-{{ tx.id }}" class="hidden mt-2">
-      <form method="POST" action="{{ url_for('admin.reject_wallet_tx', tx_id=tx.id) }}" class="flex flex-col gap-2">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="text" name="note" class="input" placeholder="Reason">
-        <button type="submit" class="btn btn-danger btn-sm w-full justify-center">Reject</button>
-      </form>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">
+      <div class="icon-wrap"><i data-feather="credit-card" style="width:28px;height:28px"></i></div>
+      <h4>No transactions {{ 'in this status' if status_f else 'yet' }}</h4>
+      <p>{{ 'Try a different filter.' if status_f else 'Deposit and withdrawal requests will appear here.' }}</p>
     </div>
     {% endif %}
   </div>
-  {% endfor %}
-  {% if pages > 1 %}
-  <div class="flex justify-center pt-2">
-    <div class="pagination">
-      {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('admin.wallet', status=status_f, type=type_filter, page=p) }}" class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-</div>
-{% endif %}
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function refreshWalletBulk() {
+  const bar = document.getElementById('wallet-bulk-bar');
+  if (!bar) return;
+  const checked = Array.from(document.querySelectorAll('.wallet-bulk-checkbox')).filter(c => c.checked);
+  bar.classList.toggle('hidden', checked.length === 0);
+  document.getElementById('wallet-selected-count').textContent = checked.length;
+}
+document.addEventListener('change', e => {
+  if (e.target.classList && e.target.classList.contains('wallet-bulk-checkbox')) refreshWalletBulk();
+  if (e.target.id === 'wallet-select-all') {
+    document.querySelectorAll('.wallet-bulk-checkbox').forEach(c => { c.checked = e.target.checked; });
+    refreshWalletBulk();
+  }
+});
+</script>
 {% endblock %}

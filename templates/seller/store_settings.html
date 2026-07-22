@@ -3,13 +3,47 @@
 {% block page_content %}
 <h1 class="font-display text-2xl font-bold mb-6">Store Settings</h1>
 
-<form method="POST" action="{{ url_for('seller.store_settings') }}" enctype="multipart/form-data">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-    <div class="lg:col-span-2 space-y-5">
+<div data-tab-group="seller-settings">
+  <div class="tabs mb-2">
+    {% for tab, label, icon in [('profile','Store Profile','store'),('security','Security','lock'),('notifications','Notifications','bell'),('payout','Payout Info','credit-card')] %}
+    <button data-tab="{{ tab }}" class="tab {% if loop.first %}active{% endif %}">
+      <i data-feather="{{ icon }}" style="width:14px;height:14px"></i> {{ label }}
+    </button>
+    {% endfor %}
+  </div>
 
-      <!-- Store Banner -->
-      <div class="card">
+  <!-- ── Store Profile tab ─────────────────────────────────────── -->
+  <div data-panel="profile">
+    <!-- Avatar (reuses existing dashboard.settings avatar handler) -->
+    <div class="card mb-5">
+      <h3 class="font-display font-bold mb-3">Profile Photo</h3>
+      <div class="flex items-center gap-5">
+        {% if profile and profile.avatar_url %}
+        <img id="seller-avatar-preview" src="{{ profile.avatar_url }}" class="w-20 h-20 rounded-2xl object-cover" alt="">
+        {% else %}
+        <div id="seller-avatar-preview" class="w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-bold text-white"
+             style="background:linear-gradient(135deg,#7C3AED,#06B6D4)">
+          {{ (current_username or 'S')[0].upper() }}
+        </div>
+        {% endif %}
+        <div>
+          <form method="POST" action="{{ url_for('dashboard.settings') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="avatar">
+            <label class="btn btn-outline btn-sm cursor-pointer">
+              <i data-feather="upload" style="width:14px;height:14px"></i> Change Photo
+              <input type="file" name="avatar" accept="image/*" class="hidden" onchange="this.form.submit()">
+            </label>
+          </form>
+          <p style="font-size:.78rem;color:var(--text-dim);margin-top:.5rem">PNG, JPG, WEBP · Max 5 MB</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Banner + store details -->
+    <form method="POST" action="{{ url_for('seller.store_settings') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="card mb-5">
         <h3 class="font-display font-bold mb-3">Store Banner</h3>
         {% if profile and profile.store_banner_url %}
         <img src="{{ profile.store_banner_url }}" class="w-full h-32 object-cover rounded-xl mb-3" alt="Banner">
@@ -21,27 +55,7 @@
         </label>
       </div>
 
-      <!-- Profile Avatar (managed in Account Settings, shown here for context) -->
-      <div class="card">
-        <h3 class="font-display font-bold mb-3">Profile Avatar</h3>
-        <div class="flex items-center gap-4">
-          {% if profile and profile.avatar_url %}
-          <img src="{{ profile.avatar_url }}" class="w-16 h-16 rounded-full object-cover" alt="Avatar">
-          {% else %}
-          <div class="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
-               style="background:linear-gradient(135deg,#7C3AED,#06B6D4)">{{ (current_username or 'S')[0]|upper }}</div>
-          {% endif %}
-          <div>
-            <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:.5rem">Your avatar is shared across your buyer and seller profile.</p>
-            <a href="{{ url_for('dashboard.settings') }}#profile" class="btn btn-outline btn-sm">
-              <i data-feather="edit-2" style="width:13px;height:13px"></i> Change Avatar
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Store Info -->
-      <div class="card">
+      <div class="card mb-5">
         <h3 class="font-display font-bold mb-4">Store Information</h3>
         <div class="form-group">
           <label class="form-label">Store Name *</label>
@@ -60,41 +74,15 @@
             <label class="form-label">Twitter / X</label>
             <input type="text" name="twitter" class="input" value="{{ profile.twitter or '' if profile else '' }}" placeholder="@handle">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom:0">
             <label class="form-label">GitHub</label>
             <input type="text" name="github" class="input" value="{{ profile.github or '' if profile else '' }}" placeholder="username">
           </div>
-          <div class="form-group" style="margin-bottom:0">
-            <label class="form-label">LinkedIn</label>
-            <input type="text" name="linkedin" class="input" value="{{ profile.linkedin or '' if profile else '' }}" placeholder="username">
-          </div>
         </div>
-      </div>
-
-      <button type="submit" class="btn btn-primary lg:hidden w-full justify-center">
-        <i data-feather="save" style="width:16px;height:16px"></i> Save Store Settings
-      </button>
-    </div>
-
-    <!-- Right: Store stats + account links -->
-    <div>
-      <div class="card mb-4">
-        <h3 class="font-display font-bold mb-4">Store Stats</h3>
-        {% for label, val in [
-          ('Total Sales',    profile.total_sales if profile else 0),
-          ('Total Revenue',  '$'~'%.2f'|format((profile.total_revenue|float if profile else 0))),
-          ('Store Rating',   '%.1f'|format((profile.seller_rating|float if profile else 0))~' ★'),
-          ('Verified',       '✅ Yes' if (profile and profile.seller_verified) else '⏳ Pending'),
-        ] %}
-        <div class="flex justify-between py-3" style="border-bottom:1px solid var(--border)">
-          <span style="font-size:.85rem;color:var(--text-muted)">{{ label }}</span>
-          <span class="font-semibold text-sm">{{ val }}</span>
-        </div>
-        {% endfor %}
       </div>
 
       {% if profile and profile.store_slug %}
-      <div class="card mb-4">
+      <div class="card mb-5">
         <h3 class="font-display font-bold mb-2">Public Store URL</h3>
         <div class="flex gap-2">
           <input type="text" class="input text-xs" value="/marketplace/store/{{ profile.store_slug }}" readonly style="font-family:monospace">
@@ -105,37 +93,89 @@
       </div>
       {% endif %}
 
-      <button type="submit" class="btn btn-primary w-full justify-center hidden lg:flex">
-        <i data-feather="save" style="width:16px;height:16px"></i> Save Store Settings
+      <button type="submit" class="btn btn-primary">
+        <i data-feather="save" style="width:16px;height:16px"></i> Save Store Profile
       </button>
-    </div>
+    </form>
   </div>
-</form>
 
-<!-- Payout, Security & Notifications -->
-<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-  <a href="{{ url_for('dashboard.wallet') }}" class="card" style="text-decoration:none;color:inherit">
-    <div class="flex items-center gap-2 mb-2">
-      <i data-feather="credit-card" style="width:16px;height:16px;color:var(--primary-light)"></i>
-      <h4 class="font-display font-bold text-sm">Payout Details</h4>
+  <!-- ── Security tab (reuses existing dashboard.settings password handler) ─ -->
+  <div data-panel="security" class="card hidden">
+    <h3 class="font-display font-bold mb-4">Change Password</h3>
+    <form method="POST" action="{{ url_for('dashboard.settings') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="password">
+      <div class="form-group">
+        <label class="form-label">Current Password</label>
+        <input type="password" name="current_password" class="input" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">New Password</label>
+        <input type="password" name="new_password" class="input" minlength="8" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm New Password</label>
+        <input type="password" name="confirm_password" class="input" minlength="8" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Update Password</button>
+    </form>
+    <div class="divider"></div>
+    <div class="flex items-center justify-between p-4 rounded-xl" style="background:var(--bg-surface);border:1px solid var(--border)">
+      <div>
+        <div class="font-semibold text-sm">Two-Factor Authentication</div>
+        <div style="font-size:.8rem;color:var(--text-muted)">Add an extra layer of security to your account</div>
+      </div>
+      <span class="badge badge-neutral">Coming soon</span>
     </div>
-    <p style="font-size:.8rem;color:var(--text-muted)">Payout method is entered each time you request a withdrawal from your Wallet.</p>
-  </a>
-  <a href="{{ url_for('dashboard.settings') }}#password" class="card" style="text-decoration:none;color:inherit">
-    <div class="flex items-center gap-2 mb-2">
-      <i data-feather="shield" style="width:16px;height:16px;color:var(--success)"></i>
-      <h4 class="font-display font-bold text-sm">Security Settings</h4>
+    <p style="font-size:.74rem;color:var(--text-dim);margin-top:.5rem">
+      <i data-feather="info" style="width:11px;height:11px;display:inline"></i>
+      The database already has fields reserved for 2FA (<code>two_factor_enabled</code>, <code>two_factor_secret</code>) — the enrollment flow (QR code + TOTP verification) is a backend feature planned for a future phase.
+    </p>
+  </div>
+
+  <!-- ── Notifications tab (reuses existing dashboard.settings notifications handler) ─ -->
+  <div data-panel="notifications" class="card hidden">
+    <form method="POST" action="{{ url_for('dashboard.settings') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="notifications">
+      {% for field, label, desc in [
+        ('notif_email','Email Notifications','Receive order updates, sales alerts, and important messages via email'),
+        ('notif_inapp','In-App Notifications','Show notification badges and alerts within the dashboard'),
+      ] %}
+      <label class="flex items-start gap-4 p-4 rounded-xl mb-3 cursor-pointer" style="background:var(--bg-surface);border:1px solid var(--border)">
+        <div style="padding-top:.1rem">
+          <input type="checkbox" name="{{ field }}" value="on"
+                 {% if (profile.notifications_email if field == 'notif_email' else profile.notifications_inapp) %}checked{% endif %}
+                 class="w-4 h-4 rounded" style="accent-color:var(--primary)">
+        </div>
+        <div>
+          <div class="font-semibold text-sm font-display" style="color:var(--text)">{{ label }}</div>
+          <div style="font-size:.82rem;color:var(--text-muted)">{{ desc }}</div>
+        </div>
+      </label>
+      {% endfor %}
+      <button type="submit" class="btn btn-primary mt-2">Save Preferences</button>
+    </form>
+  </div>
+
+  <!-- ── Payout Info tab ─────────────────────────────────────────── -->
+  <div data-panel="payout" class="card hidden">
+    <h3 class="font-display font-bold mb-2">Payout Details</h3>
+    <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">
+      Payout details (bank account, PayPal, or crypto address) are currently entered fresh with each withdrawal
+      request rather than saved to your profile.
+    </p>
+    <div class="flex items-center gap-3 p-4 rounded-xl mb-3" style="background:var(--bg-surface);border:1px solid var(--border)">
+      <i data-feather="info" style="width:16px;height:16px;color:var(--accent);flex-shrink:0"></i>
+      <p style="font-size:.8rem;color:var(--text-muted)">
+        To persist a saved payout method (so you don't retype it every time), a small schema addition would be
+        needed — e.g. a <code>payout_methods</code> table linked to <code>users.id</code>. That's a planned
+        future enhancement; for now, enter your details each time you request a withdrawal.
+      </p>
     </div>
-    <p style="font-size:.8rem;color:var(--text-muted)">Change your password and manage account security.</p>
-  </a>
-  <a href="{{ url_for('dashboard.settings') }}#notifications" class="card" style="text-decoration:none;color:inherit">
-    <div class="flex items-center gap-2 mb-2">
-      <i data-feather="bell" style="width:16px;height:16px;color:var(--warning)"></i>
-      <h4 class="font-display font-bold text-sm">Notification Preferences</h4>
-    </div>
-    <p style="font-size:.8rem;color:var(--text-muted)">Choose which emails and in-app alerts you receive.</p>
-  </a>
+    <a href="{{ url_for('seller.withdrawals') }}" class="btn btn-primary btn-sm">
+      <i data-feather="trending-down" style="width:14px;height:14px"></i> Go to Withdrawals
+    </a>
+  </div>
 </div>
-<!-- TODO: Persisted payout methods (e.g. saved PayPal email / bank details) would need a
-     new `payout_details JSONB` column on user_profiles — not added here per schema-change rules. -->
 {% endblock %}

@@ -1,17 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
-  <script>
-    // Runs before any CSS loads, so there's no flash of the wrong theme.
-    (function() {
-      var saved = localStorage.getItem('mercx_theme');
-      var theme = saved || 'dark';
-      if (theme === 'light') {
-        document.documentElement.setAttribute('data-theme', 'light');
-        document.documentElement.classList.remove('dark');
-      }
-    })();
-  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -129,13 +118,6 @@
 
     <!-- Right side -->
     <div class="flex items-center gap-2 ml-auto">
-
-      <!-- Theme toggle -->
-      <button id="theme-toggle" type="button" class="flex items-center justify-center w-9 h-9 rounded-lg"
-              style="background:var(--bg-surface);border:1px solid var(--border)" aria-label="Toggle theme">
-        <i data-feather="moon" id="theme-icon-dark" style="width:16px;height:16px;color:var(--text-muted)"></i>
-        <i data-feather="sun" id="theme-icon-light" style="width:16px;height:16px;color:var(--text-muted);display:none"></i>
-      </button>
 
       <!-- Search (mobile toggle) -->
       <a href="{{ url_for('main.search') }}" class="lg:hidden flex items-center justify-center w-9 h-9 rounded-lg"

@@ -1,234 +1,305 @@
 {% extends 'seller/base.html' %}
-{% block title %}Seller Dashboard — MercX{% endblock %}
+{% block title %}Seller Dashboard — MercX Digital{% endblock %}
 {% block page_content %}
 
-<!-- Welcome header -->
-<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-  <div class="flex items-center gap-3">
-    {% if profile and profile.avatar_url %}
-    <img src="{{ profile.avatar_url }}" class="w-12 h-12 rounded-xl object-cover" alt="">
-    {% else %}
-    <div class="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold text-white"
-         style="background:linear-gradient(135deg,#7C3AED,#06B6D4)">{{ (user.username or 'S')[0]|upper }}</div>
-    {% endif %}
-    <div>
-      <h1 class="font-display text-xl font-bold flex items-center gap-2">
-        Welcome back, {{ profile.store_name if profile and profile.store_name else user.username }}
-        {% if profile and profile.seller_verified %}
-        <span class="badge badge-accent"><i data-feather="check-circle" style="width:11px;height:11px"></i> Verified</span>
-        {% endif %}
-      </h1>
-      <p style="color:var(--text-muted);font-size:.85rem">Here's how your store is performing</p>
+<!-- ── Welcome Header ─────────────────────────────────────────── -->
+<div class="seller-hero mb-6 reveal">
+  <div class="flex flex-wrap items-center justify-between gap-4" style="position:relative;z-index:1">
+    <div class="flex items-center gap-4">
+      {% if profile and profile.avatar_url %}
+      <img src="{{ profile.avatar_url }}" class="w-14 h-14 rounded-2xl object-cover flex-shrink-0" alt="">
+      {% else %}
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 text-xl font-bold text-white"
+           style="background:linear-gradient(135deg,#7C3AED,#06B6D4)">
+        {{ (user.username or 'S')[0].upper() }}
+      </div>
+      {% endif %}
+      <div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <h1 class="font-display text-xl font-bold">
+            {{ profile.store_name if profile and profile.store_name else 'Welcome back, ' ~ (user.username or '') }}
+          </h1>
+          {% if profile and profile.seller_verified %}
+          <span class="badge badge-accent"><i data-feather="check-circle" style="width:11px;height:11px"></i> Verified Seller</span>
+          {% else %}
+          <span class="badge badge-warning"><i data-feather="clock" style="width:11px;height:11px"></i> Verification Pending</span>
+          {% endif %}
+        </div>
+        <p style="font-size:.85rem;color:var(--text-muted)">
+          {{ profile.store_description|truncate_text(90) if profile and profile.store_description else 'Manage your products, orders, and earnings.' }}
+        </p>
+      </div>
+    </div>
+    <div class="flex gap-3 flex-wrap">
+      <a href="{{ url_for('seller.create_listing') }}" class="btn btn-primary">
+        <i data-feather="plus" style="width:15px;height:15px"></i> New Product
+      </a>
+      <a href="{{ url_for('seller.withdrawals') }}" class="btn" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:var(--text)">
+        <i data-feather="trending-down" style="width:15px;height:15px"></i> Withdraw
+      </a>
     </div>
   </div>
-  <a href="{{ url_for('seller.create_listing') }}" class="btn btn-primary">
-    <i data-feather="plus" style="width:15px;height:15px"></i> New Product
-  </a>
 </div>
 
-{% if pending_approval > 0 or manual_pending %}
-<div class="card mb-6" style="border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.06)">
-  <div class="flex items-start gap-3">
-    <i data-feather="alert-triangle" style="width:18px;height:18px;color:var(--warning);flex-shrink:0;margin-top:2px"></i>
-    <div style="font-size:.85rem;color:var(--text-muted)">
-      {% if pending_approval > 0 %}You have <strong style="color:var(--text)">{{ pending_approval }}</strong> product(s) awaiting approval. {% endif %}
-      {% if manual_pending %}<strong style="color:var(--text)">{{ manual_pending|length }}</strong> order(s) need manual delivery — <a href="{{ url_for('seller.orders') }}" style="color:var(--primary-light);text-decoration:underline">view orders</a>.{% endif %}
-    </div>
-  </div>
-</div>
-{% endif %}
-
-<!-- Wallet -->
+<!-- ── Wallet Row ─────────────────────────────────────────────── -->
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-  <div class="stat-card" style="background:linear-gradient(135deg,rgba(124,58,237,.12),rgba(6,182,212,.08));border-color:rgba(124,58,237,.3)">
-    <div class="stat-icon" style="background:rgba(124,58,237,.18);color:var(--primary-light)"><i data-feather="dollar-sign" style="width:22px;height:22px"></i></div>
-    <div>
-      <div class="stat-value">${{ '%.2f'|format(balance) }}</div>
-      <div class="stat-label">Available Balance</div>
-      <a href="{{ url_for('dashboard.wallet') }}" class="stat-change up" style="text-decoration:none">Withdraw →</a>
-    </div>
+  <div class="wallet-card reveal" style="padding:1.5rem">
+    <p style="position:relative;z-index:1;font-size:.72rem;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.08em;font-family:'Space Grotesk',sans-serif;margin-bottom:.4rem">Available Balance</p>
+    <div style="position:relative;z-index:1" class="font-display font-bold text-2xl gradient-text">${{ '%.2f'|format(user.balance|float if user else 0) }}</div>
+    <a href="{{ url_for('seller.withdrawals') }}" style="position:relative;z-index:1;font-size:.78rem;color:#a78bfa;display:inline-block;margin-top:.5rem">Withdraw now →</a>
   </div>
-  <div class="stat-card">
-    <div class="stat-icon" style="background:rgba(245,158,11,.15);color:var(--warning)"><i data-feather="clock" style="width:22px;height:22px"></i></div>
-    <div>
-      <div class="stat-value">${{ '%.2f'|format(pending_balance) }}</div>
-      <div class="stat-label">Pending Balance</div>
-      <div style="font-size:.75rem;color:var(--text-dim);margin-top:.5rem">From orders not yet completed</div>
-    </div>
+  <div class="stat-pill reveal">
+    <div class="label">Pending Balance</div>
+    <div class="value" style="color:var(--warning)">${{ '%.2f'|format(pending_balance|float) }}</div>
+    <div class="sub">Released once orders complete</div>
   </div>
-  <div class="stat-card">
-    <div class="stat-icon" style="background:rgba(16,185,129,.15);color:var(--success)"><i data-feather="trending-up" style="width:22px;height:22px"></i></div>
-    <div>
-      <div class="stat-value">${{ '%.2f'|format(total_revenue) }}</div>
-      <div class="stat-label">Total Revenue (all time)</div>
-    </div>
+  <div class="stat-pill reveal">
+    <div class="label">Total Revenue (All Time)</div>
+    <div class="value" style="color:var(--success)">${{ '%.2f'|format(total_revenue|float) }}</div>
+    <div class="sub">{{ total_sales }} completed sale{{ 's' if total_sales != 1 }}</div>
   </div>
 </div>
 
-<!-- Core stats -->
-<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+<!-- ── Stat Grid ──────────────────────────────────────────────── -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
   {% set stats = [
-    ('shopping-bag', total_sales, 'Total Sales', 'var(--primary)'),
-    ('shopping-cart', pending_orders, 'Pending Orders', 'var(--warning)'),
-    ('check-circle', active_listings, 'Active Products', 'var(--success)'),
-    ('hourglass', pending_approval, 'Pending Review', 'var(--warning)'),
-    ('star', avg_rating, 'Avg. Rating', '#F59E0B'),
-    ('percent', conversion_rate|string ~ '%', 'Conversion Rate', 'var(--accent)'),
+    ('shopping-bag',  'Total Orders',        total_orders,                         '#7C3AED'),
+    ('package',       'Active Products',     active_listings,                      '#10B981'),
+    ('file-text',     'Draft Products',      draft_count,                          '#94A3B8'),
+    ('clock',         'Pending Review',      pending_approval,                     '#F59E0B'),
+    ('star',          'Average Rating',      '%.1f'|format(avg_rating|float),      '#F59E0B'),
+    ('trending-up',   'Conversion Rate',     conversion_rate|string ~ '%',         '#06B6D4'),
+    ('eye',           'Total Views',         total_views,                          '#8B5CF6'),
+    ('download',      'Total Downloads',     total_downloads,                      '#EC4899'),
   ] %}
-  {% for icon, value, label, color in stats %}
-  <div class="card reveal" style="padding:1.1rem;text-align:center">
-    <i data-feather="{{ icon }}" style="width:18px;height:18px;color:{{ color }};margin-bottom:.5rem"></i>
-    <div class="font-display font-bold text-lg">{{ value }}</div>
-    <div style="font-size:.72rem;color:var(--text-muted)">{{ label }}</div>
+  {% for icon, label, val, color in stats %}
+  <div class="stat-pill reveal">
+    <div class="flex items-center gap-2 mb-2">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:{{ color }}1f;color:{{ color }}">
+        <i data-feather="{{ icon }}" style="width:15px;height:15px"></i>
+      </div>
+    </div>
+    <div class="value">{{ val }}</div>
+    <div class="label" style="margin-top:.3rem;margin-bottom:0">{{ label }}</div>
   </div>
   {% endfor %}
 </div>
-<!-- Rejected products note (Draft status is not yet supported — see TODO below) -->
-{% if rejected_listings > 0 %}
-<p style="font-size:.78rem;color:var(--text-dim);margin:-1rem 0 1.5rem">{{ rejected_listings }} product(s) were rejected during review — <a href="{{ url_for('seller.inventory') }}?status=rejected" style="color:var(--primary-light)">view them</a>.</p>
+
+{% if draft_count == 0 %}
+<p class="mb-6" style="font-size:.76rem;color:var(--text-dim)">
+  <i data-feather="info" style="width:11px;height:11px;display:inline"></i>
+  Draft products are coming in a future update — every product currently goes straight to review when created.
+</p>
 {% endif %}
 
-<!-- Revenue chart -->
-<div class="card mb-6">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="font-display font-bold">Monthly Revenue</h3>
+<!-- ── Revenue Chart + Quick Actions ──────────────────────────── -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+  <div class="card lg:col-span-2 reveal">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-bold">Monthly Revenue</h3>
+      <a href="{{ url_for('seller.analytics') }}" class="btn btn-ghost btn-sm">Full Analytics</a>
+    </div>
+    {% if monthly_values and monthly_values|sum > 0 %}
+    <canvas id="revenue-chart" height="110"></canvas>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon-wrap"><i data-feather="bar-chart-2" style="width:26px;height:26px"></i></div>
+      <h4>No revenue yet</h4>
+      <p>Once you make your first sale, your monthly revenue trend will appear here.</p>
+    </div>
+    {% endif %}
   </div>
-  {% if monthly_labels %}
-  <div style="height:260px"><canvas id="revenueChart"></canvas></div>
-  {% else %}
-  <div style="text-align:center;padding:2.5rem">
-    <i data-feather="bar-chart-2" style="width:32px;height:32px;color:var(--text-dim);margin-bottom:.5rem"></i>
-    <p style="color:var(--text-muted);font-size:.85rem">No revenue yet — completed sales will appear here.</p>
+  <div class="card reveal">
+    <h3 class="font-display font-bold mb-4">Quick Actions</h3>
+    <div class="space-y-2">
+      <a href="{{ url_for('seller.create_listing') }}" class="btn btn-ghost w-full justify-start"><i data-feather="plus-circle" style="width:15px;height:15px"></i> Create Product</a>
+      <a href="{{ url_for('seller.inventory') }}" class="btn btn-ghost w-full justify-start"><i data-feather="grid" style="width:15px;height:15px"></i> Manage Products</a>
+      <a href="{{ url_for('seller.orders') }}" class="btn btn-ghost w-full justify-start"><i data-feather="shopping-cart" style="width:15px;height:15px"></i> View Orders</a>
+      <a href="{{ url_for('seller.store_settings') }}" class="btn btn-ghost w-full justify-start"><i data-feather="settings" style="width:15px;height:15px"></i> Store Settings</a>
+    </div>
   </div>
-  {% endif %}
 </div>
 
-<!-- Recent activity -->
-<div data-tab-group="activity-tabs" class="mb-4">
+<!-- ── Pending Manual Deliveries ──────────────────────────────── -->
+{% if manual_pending %}
+<div class="card mb-6 reveal" style="border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.03)">
+  <div class="flex items-center gap-3 mb-4">
+    <i data-feather="alert-circle" style="width:20px;height:20px;color:var(--danger)"></i>
+    <h3 class="font-display font-bold">Pending Manual Deliveries ({{ manual_pending|length }})</h3>
+  </div>
+  {% for row in manual_pending %}
+  <div class="p-4 rounded-xl mb-3" style="background:var(--bg-surface);border:1px solid var(--border)">
+    <div class="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <span class="font-mono text-sm" style="color:var(--primary-light)">{{ row.order.order_number }}</span>
+        {% for item in row['items'] %}
+        <div style="font-size:.85rem;color:var(--text-muted)">{{ item.title }}</div>
+        {% endfor %}
+      </div>
+      {% for item in row['items'] %}
+      <form method="POST" action="{{ url_for('seller.deliver_order', order_id=row.order.id) }}" class="flex gap-2 flex-wrap">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="item_id" value="{{ item.id }}">
+        <textarea name="delivery_content" class="input" placeholder="Paste delivery content or license key…" rows="2" required style="min-width:280px"></textarea>
+        <button type="submit" class="btn btn-success btn-sm"><i data-feather="send" style="width:14px;height:14px"></i> Deliver</button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- ── Recent Activity (tabbed) ───────────────────────────────── -->
+<div class="card reveal" data-tab-group="activity">
+  <div class="flex items-center justify-between mb-2 flex-wrap gap-3">
+    <h3 class="font-display font-bold">Recent Activity</h3>
+  </div>
   <div class="tabs">
-    <button data-tab="sales" class="tab active">Recent Sales</button>
+    <button data-tab="sales" class="tab active">Sales</button>
+    <button data-tab="orders" class="tab">Orders</button>
     <button data-tab="reviews" class="tab">Reviews</button>
     <button data-tab="messages" class="tab">Messages</button>
     <button data-tab="withdrawals" class="tab">Withdrawals</button>
     <button data-tab="notifications" class="tab">Notifications</button>
   </div>
-</div>
 
-<div data-panel="sales" class="card mb-8" style="padding:0">
-  {% if recent_orders %}
-  <div class="table-wrap">
-    <table class="table">
-      <thead><tr><th>Order</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-      <tbody>
-        {% for o in recent_orders[:6] %}
-        <tr>
-          <td>#{{ o.id[:8] }}</td>
-          <td>${{ '%.2f'|format(o.total|float) }}</td>
-          <td><span class="badge badge-{{ {'completed':'success','pending':'warning','processing':'accent','cancelled':'danger','refunded':'neutral'}.get(o.status,'neutral') }}">{{ o.status|title }}</span></td>
-          <td style="color:var(--text-dim)">{{ o.created_at[:10] }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div style="text-align:center;padding:2.5rem"><i data-feather="shopping-bag" style="width:32px;height:32px;color:var(--text-dim);margin-bottom:.5rem"></i><p style="color:var(--text-muted);font-size:.85rem">No sales yet.</p></div>
-  {% endif %}
-</div>
-
-<div data-panel="reviews" class="card mb-8" style="display:none;padding:0">
-  {% if recent_reviews %}
-  <div style="padding:.5rem 0">
-    {% for r in recent_reviews %}
-    <div class="product-row">
-      <div style="display:flex;gap:.1rem;flex-shrink:0">{% for i in range(1,6) %}<span style="font-size:.8rem;color:{{ '#F59E0B' if i<=r.rating else 'var(--bg-elevated)' }}">★</span>{% endfor %}</div>
-      <div style="flex:1;min-width:0;font-size:.85rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.review_text or 'No comment left' }}</div>
-      <span style="font-size:.75rem;color:var(--text-dim);flex-shrink:0">{{ r.created_at[:10] }}</span>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div style="text-align:center;padding:2.5rem"><i data-feather="star" style="width:32px;height:32px;color:var(--text-dim);margin-bottom:.5rem"></i><p style="color:var(--text-muted);font-size:.85rem">No reviews yet.</p></div>
-  {% endif %}
-</div>
-
-<div data-panel="messages" class="card mb-8" style="display:none;padding:0">
-  {% if recent_messages %}
-  <div style="padding:.5rem 0">
-    {% for c in recent_messages %}
-    <a href="{{ url_for('dashboard.messages') }}" class="product-row" style="text-decoration:none;color:inherit">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.85rem;font-weight:600">{{ c.other_user.username if c.other_user else 'User' }}</div>
-        <div style="font-size:.78rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.last_message_preview or '' }}</div>
+  <!-- Sales -->
+  <div data-panel="sales">
+    {% if recent_sales %}
+      {% for o in recent_sales %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(16,185,129,.15);color:#10B981"><i data-feather="dollar-sign" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">Sale — {{ o.order_number }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ o.created_at[:10] }}</div>
+        </div>
+        <span class="font-semibold" style="color:var(--success)">${{ '%.2f'|format(o.total|float) }}</span>
       </div>
-      {% if c.unread %}<span class="badge badge-primary" style="flex-shrink:0">{{ c.unread }}</span>{% endif %}
-    </a>
-    {% endfor %}
+      {% endfor %}
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="dollar-sign" style="width:24px;height:24px"></i></div><h4>No sales yet</h4><p>Your completed sales will show up here.</p></div>
+    {% endif %}
   </div>
-  {% else %}
-  <div style="text-align:center;padding:2.5rem"><i data-feather="message-circle" style="width:32px;height:32px;color:var(--text-dim);margin-bottom:.5rem"></i><p style="color:var(--text-muted);font-size:.85rem">No messages yet.</p></div>
-  {% endif %}
-</div>
 
-<div data-panel="withdrawals" class="card mb-8" style="display:none;padding:0">
-  {% if recent_withdrawals %}
-  <div style="padding:.5rem 0">
-    {% for w in recent_withdrawals %}
-    <div class="product-row">
-      <div style="flex:1;font-size:.85rem">${{ '%.2f'|format(w.amount|float) }}</div>
-      <span class="badge badge-{{ {'completed':'success','pending':'warning','failed':'danger'}.get(w.status,'neutral') }}">{{ w.status|title }}</span>
-      <span style="font-size:.75rem;color:var(--text-dim);width:90px;text-align:right">{{ w.created_at[:10] }}</span>
-    </div>
-    {% endfor %}
+  <!-- Orders -->
+  <div data-panel="orders" class="hidden">
+    {% if recent_orders %}
+      {% for o in recent_orders %}
+      {% set sc = {'completed':'success','pending':'warning','processing':'accent','cancelled':'danger','refunded':'neutral'} %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i data-feather="shopping-bag" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ o.order_number }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ o.created_at[:10] }}</div>
+        </div>
+        <span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="shopping-bag" style="width:24px;height:24px"></i></div><h4>No orders yet</h4><p>Incoming orders will appear here as soon as you make a sale.</p></div>
+    {% endif %}
   </div>
-  {% else %}
-  <div style="text-align:center;padding:2.5rem"><i data-feather="credit-card" style="width:32px;height:32px;color:var(--text-dim);margin-bottom:.5rem"></i><p style="color:var(--text-muted);font-size:.85rem">No withdrawals yet.</p></div>
-  {% endif %}
-  <div style="padding:.85rem 1rem;border-top:1px solid var(--border)">
-    <a href="{{ url_for('dashboard.wallet') }}" style="font-size:.82rem;color:var(--primary-light)">Manage withdrawals →</a>
+
+  <!-- Reviews -->
+  <div data-panel="reviews" class="hidden">
+    {% if recent_reviews %}
+      {% for r in recent_reviews %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(245,158,11,.15);color:#F59E0B"><i data-feather="star" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ r.buyer.username if r.buyer else 'Buyer' }} rated {{ r.rating }}★</div>
+          <div class="truncate-2" style="font-size:.78rem;color:var(--text-muted)">{{ r.review_text or 'No comment left.' }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('seller.reviews') }}" class="btn btn-ghost btn-sm mt-2">View all reviews</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="star" style="width:24px;height:24px"></i></div><h4>No reviews yet</h4><p>Buyer reviews for your products will show up here.</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Messages -->
+  <div data-panel="messages" class="hidden">
+    {% if recent_messages %}
+      {% for c in recent_messages %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(6,182,212,.15);color:#06B6D4"><i data-feather="message-circle" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ c.other_user.username if c.other_user else 'User' }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ (c.last_message_at or '')[:16].replace('T',' ') }}</div>
+        </div>
+        <a href="{{ url_for('dashboard.messages', conversation=c.id) }}" class="btn btn-ghost btn-sm">Open</a>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="message-circle" style="width:24px;height:24px"></i></div><h4>No messages yet</h4><p>Conversations with buyers will appear here.</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Withdrawals -->
+  <div data-panel="withdrawals" class="hidden">
+    {% if recent_withdrawals %}
+      {% for w in recent_withdrawals %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(239,68,68,.12);color:#EF4444"><i data-feather="trending-down" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">${{ '%.2f'|format(w.amount|float) }} withdrawal</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ w.created_at[:10] }}</div>
+        </div>
+        <span class="badge badge-{{ 'success' if w.status=='completed' else ('warning' if w.status=='pending' else 'danger') }}">{{ w.status }}</span>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('seller.withdrawals') }}" class="btn btn-ghost btn-sm mt-2">View all withdrawals</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="trending-down" style="width:24px;height:24px"></i></div><h4>No withdrawals yet</h4><p>Your withdrawal history will show up here.</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Notifications -->
+  <div data-panel="notifications" class="hidden">
+    {% if recent_notifications %}
+      {% for n in recent_notifications %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(139,92,246,.15);color:#8B5CF6"><i data-feather="{{ n.icon or 'bell' }}" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ n.title }}</div>
+          <div class="truncate-2" style="font-size:.78rem;color:var(--text-muted)">{{ n.message }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('dashboard.notifications') }}" class="btn btn-ghost btn-sm mt-2">View all notifications</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="bell" style="width:24px;height:24px"></i></div><h4>No notifications yet</h4><p>You're all caught up.</p></div>
+    {% endif %}
   </div>
 </div>
+{% endblock %}
 
-<div data-panel="notifications" class="card mb-8" style="display:none;padding:0">
-  {% if recent_notifications %}
-  <div style="padding:.5rem 0">
-    {% for n in recent_notifications %}
-    <div class="product-row">
-      <i data-feather="bell" style="width:14px;height:14px;color:var(--primary-light);flex-shrink:0"></i>
-      <div style="flex:1;min-width:0;font-size:.85rem">{{ n.title or n.message }}</div>
-      <span style="font-size:.75rem;color:var(--text-dim);flex-shrink:0">{{ n.created_at[:10] }}</span>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div style="text-align:center;padding:2.5rem"><i data-feather="bell" style="width:32px;height:32px;color:var(--text-dim);margin-bottom:.5rem"></i><p style="color:var(--text-muted);font-size:.85rem">You're all caught up.</p></div>
-  {% endif %}
-</div>
-
-{% if monthly_labels %}
+{% block extra_scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-new Chart(document.getElementById('revenueChart'), {
-  type: 'bar',
-  data: {
-    labels: {{ monthly_labels|tojson }},
-    datasets: [{
-      label: 'Revenue',
-      data: {{ monthly_values|tojson }},
-      backgroundColor: 'rgba(124,58,237,.55)',
-      borderRadius: 6,
-      maxBarThickness: 42
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,.06)' }, ticks: { color: '#94A3B8', callback: v => '$'+v } },
-      x: { grid: { display: false }, ticks: { color: '#94A3B8' } }
+const revCtx = document.getElementById('revenue-chart');
+if (revCtx) {
+  new Chart(revCtx, {
+    type: 'line',
+    data: {
+      labels: {{ monthly_labels|tojson }},
+      datasets: [{
+        label: 'Revenue ($)', data: {{ monthly_values|tojson }},
+        borderColor: '#7C3AED', backgroundColor: 'rgba(124,58,237,.1)',
+        borderWidth: 2.5, fill: true, tension: 0.4,
+        pointBackgroundColor: '#7C3AED', pointRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#94A3B8' } },
+        y: { grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#94A3B8', callback: v => '$'+v } }
+      }
     }
-  }
-});
+  });
+}
 </script>
-{% endif %}
 {% endblock %}

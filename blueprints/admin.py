@@ -21,6 +21,8 @@ def dashboard():
     pending_ap      = len(db_select("listings", "id", filters={"status": "pending"}))
     total_orders    = len(db_select("orders", "id"))
     completed_orders = len(db_select("orders", "id", filters={"status": "completed"}))
+    pending_reports = len(db_select("listing_reports", "id", filters={"status": "pending"}))
+    open_tickets    = len(db_select("support_tickets", "id", filters={"status": "open"}))
 
     # Revenue
     completed = db_select("orders", "total,platform_fee,created_at",
@@ -39,15 +41,36 @@ def dashboard():
 
     # Recent activity
     recent_users   = db_select("users", "id,username,email,role,created_at",
-                               order="-created_at", limit=5)
+                               order="-created_at", limit=6)
     recent_orders  = db_select("orders", "id,order_number,status,total,created_at",
-                               order="-created_at", limit=5)
+                               order="-created_at", limit=6)
     pending_deposits = db_select("wallet_transactions", "*",
                                  filters={"type": "deposit", "status": "pending"})
     pending_withdrawals = db_select("wallet_transactions", "*",
                                     filters={"type": "withdrawal", "status": "pending"})
-    pending_reports = len(db_select("listing_reports", "id", filters={"status": "pending"}))
-    open_tickets    = len(db_select("support_tickets", "id", filters={"status": "open"}))
+
+    # Recent pending listings (for activity tab)
+    recent_pending_listings = db_select(
+        "listings", "id,title,seller_id,price,created_at",
+        filters={"status": "pending"}, order="-created_at", limit=6
+    )
+    for l in recent_pending_listings:
+        seller = db_select("users", "id,username", filters={"id": l["seller_id"]}, single=True)
+        l["seller"] = seller
+
+    # Recent reports (for activity tab)
+    recent_reports = db_select("listing_reports", "*", filters={"status": "pending"},
+                               order="-created_at", limit=6)
+    for r in recent_reports:
+        listing = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
+        r["listing"] = listing
+
+    # Recent support tickets (for activity tab)
+    recent_tickets = db_select("support_tickets", "*", filters={"status": "open"},
+                               order="-created_at", limit=6)
+    for t in recent_tickets:
+        u = db_select("users", "id,username", filters={"id": t["user_id"]}, single=True)
+        t["user"] = u
 
     # User registration trend
     user_monthly = {}
@@ -65,6 +88,8 @@ def dashboard():
         pending_approval=pending_ap,
         total_orders=total_orders,
         completed_orders=completed_orders,
+        pending_reports=pending_reports,
+        open_tickets=open_tickets,
         total_revenue=total_revenue,
         platform_fees=platform_fees,
         monthly_labels=months_12,
@@ -73,10 +98,11 @@ def dashboard():
         user_values=user_values,
         recent_users=recent_users,
         recent_orders=recent_orders,
+        recent_pending_listings=recent_pending_listings,
+        recent_reports=recent_reports,
+        recent_tickets=recent_tickets,
         pending_deposits=len(pending_deposits),
         pending_withdrawals=len(pending_withdrawals),
-        pending_reports=pending_reports,
-        open_tickets=open_tickets,
     )
 
 
@@ -124,15 +150,9 @@ def user_detail(user_id):
                         order="-created_at", limit=20)
     listings = db_select("listings", "id,title,status,sales_count,price,created_at",
                          filters={"seller_id": user_id}, order="-created_at")
-    login_history = db_select("audit_logs", "*",
-                              filters={"user_id": user_id, "action": "login"},
-                              order="-created_at", limit=10)
-    from utils.helpers import parse_user_agent
-    for l in login_history:
-        l["ua_info"] = parse_user_agent(l.get("user_agent"))
     return render_template("admin/user_detail.html",
         user=user, profile=profile, orders=orders,
-        transactions=tx, listings=listings, login_history=login_history)
+        transactions=tx, listings=listings)
 
 
 @admin_bp.route("/users/<user_id>/ban", methods=["POST"])
@@ -140,8 +160,7 @@ def user_detail(user_id):
 def ban_user(user_id):
     reason = request.form.get("reason", "Policy violation").strip()
     db_update("users", {"is_banned": True, "suspend_reason": reason}, {"id": user_id})
-    log_audit(session["user_id"], "ban_user", resource_id=user_id, details={"reason": reason},
-              ip=request.remote_addr, ua=request.user_agent.string)
+    log_audit(session["user_id"], "ban_user", resource_id=user_id, details={"reason": reason})
     flash("User banned.", "success")
     return redirect(url_for("admin.user_detail", user_id=user_id))
 
@@ -150,8 +169,7 @@ def ban_user(user_id):
 @admin_required
 def unban_user(user_id):
     db_update("users", {"is_banned": False, "suspend_reason": None}, {"id": user_id})
-    log_audit(session["user_id"], "unban_user", resource_id=user_id,
-              ip=request.remote_addr, ua=request.user_agent.string)
+    log_audit(session["user_id"], "unban_user", resource_id=user_id)
     flash("User unbanned.", "success")
     return redirect(url_for("admin.user_detail", user_id=user_id))
 
@@ -164,8 +182,7 @@ def set_role(user_id):
         flash("Invalid role.", "danger")
         return redirect(url_for("admin.user_detail", user_id=user_id))
     db_update("users", {"role": new_role}, {"id": user_id})
-    log_audit(session["user_id"], "set_role", resource_id=user_id, details={"role": new_role},
-              ip=request.remote_addr, ua=request.user_agent.string)
+    log_audit(session["user_id"], "set_role", resource_id=user_id, details={"role": new_role})
     flash(f"Role updated to {new_role}.", "success")
     return redirect(url_for("admin.user_detail", user_id=user_id))
 
@@ -181,8 +198,7 @@ def verify_seller(user_id):
         "message": "Your seller account has been verified. You can now list products.",
         "link": "/seller/dashboard",
     })
-    log_audit(session["user_id"], "verify_seller", resource_id=user_id,
-              ip=request.remote_addr, ua=request.user_agent.string)
+    log_audit(session["user_id"], "verify_seller", resource_id=user_id)
     flash("Seller verified.", "success")
     return redirect(url_for("admin.user_detail", user_id=user_id))
 
@@ -246,8 +262,7 @@ def approve_listing(listing_id):
         "message": f'"{listing["title"]}" is now live on the marketplace.',
         "link": "/seller/inventory",
     })
-    log_audit(session["user_id"], "approve_listing", resource_id=listing_id,
-              ip=request.remote_addr, ua=request.user_agent.string)
+    log_audit(session["user_id"], "approve_listing", resource_id=listing_id)
     flash("Listing approved and published.", "success")
     return redirect(url_for("admin.listings", status="pending"))
 
@@ -278,7 +293,7 @@ def reject_listing(listing_id):
         "link": "/seller/inventory",
     })
     log_audit(session["user_id"], "reject_listing", resource_id=listing_id,
-              details={"reason": reason}, ip=request.remote_addr, ua=request.user_agent.string)
+              details={"reason": reason})
     flash("Listing rejected.", "warning")
     return redirect(url_for("admin.listings", status="pending"))
 
@@ -304,10 +319,74 @@ def delete_listing(listing_id):
         "status": "deleted",
         "deleted_at": datetime.now(timezone.utc).isoformat(),
     }, {"id": listing_id})
-    log_audit(session["user_id"], "admin_delete_listing", resource_id=listing_id,
-              ip=request.remote_addr, ua=request.user_agent.string)
+    log_audit(session["user_id"], "admin_delete_listing", resource_id=listing_id)
     flash("Listing deleted.", "success")
     return redirect(url_for("admin.listings"))
+
+
+@admin_bp.route("/listings/bulk-action", methods=["POST"])
+@admin_required
+def bulk_listing_action():
+    """Approve / reject / feature / delete multiple listings at once.
+    Reuses the exact same per-item logic as the single-item routes above —
+    no new business rules introduced."""
+    action      = request.form.get("action", "")
+    listing_ids = request.form.getlist("listing_ids")
+    reason      = request.form.get("reason", "").strip()
+
+    if not listing_ids:
+        flash("No listings selected.", "warning")
+        return redirect(url_for("admin.listings"))
+
+    count = 0
+    for lid in listing_ids:
+        listing = db_select("listings", "title,seller_id", filters={"id": lid}, single=True)
+        if not listing:
+            continue
+
+        if action == "approve":
+            db_update("listings", {"is_approved": True, "status": "active"}, {"id": lid})
+            seller = db_select("users", "email,username", filters={"id": listing["seller_id"]}, single=True)
+            if seller:
+                send_listing_status(seller["email"], seller["username"], listing["title"], "approved")
+            db_insert("notifications", {
+                "user_id": listing["seller_id"], "type": "listing_approved", "icon": "check-circle",
+                "title": "Listing Approved! ✅",
+                "message": f'"{listing["title"]}" is now live on the marketplace.',
+                "link": "/seller/inventory",
+            })
+            count += 1
+
+        elif action == "reject":
+            db_update("listings", {
+                "status": "rejected", "is_approved": False, "reject_reason": reason
+            }, {"id": lid})
+            seller = db_select("users", "email,username", filters={"id": listing["seller_id"]}, single=True)
+            if seller:
+                send_listing_status(seller["email"], seller["username"],
+                                    listing["title"], "rejected", reason)
+            db_insert("notifications", {
+                "user_id": listing["seller_id"], "type": "listing_rejected", "icon": "x-circle",
+                "title": "Listing Rejected ❌",
+                "message": f'"{listing["title"]}" was rejected. {reason}',
+                "link": "/seller/inventory",
+            })
+            count += 1
+
+        elif action == "delete":
+            db_update("listings", {
+                "status": "deleted",
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+            }, {"id": lid})
+            count += 1
+
+        elif action == "feature":
+            db_update("listings", {"is_featured": True}, {"id": lid})
+            count += 1
+
+    log_audit(session["user_id"], "bulk_listing_action", details={"action": action, "count": count})
+    flash(f"{count} listing(s) updated.", "success")
+    return redirect(url_for("admin.listings", status=request.form.get("current_status", "")))
 
 
 # ── Orders ────────────────────────────────────────────────────
@@ -347,7 +426,7 @@ def orders():
 
 
 @admin_bp.route("/orders/<order_id>/refund", methods=["POST"])
-@super_admin_required
+@admin_required
 def refund_order(order_id):
     amount = request.form.get("amount", "")
     reason = request.form.get("reason", "Admin refund").strip()
@@ -392,8 +471,7 @@ def refund_order(order_id):
         "link": "/dashboard/wallet",
     })
     log_audit(session["user_id"], "refund_order", resource_id=order_id,
-              details={"amount": amount, "reason": reason},
-              ip=request.remote_addr, ua=request.user_agent.string)
+              details={"amount": amount, "reason": reason})
     flash(f"Refund of ${amount:.2f} issued.", "success")
     return redirect(url_for("admin.orders"))
 
@@ -429,13 +507,12 @@ def wallet():
         status_f=status_f, page=page, pages=pages, total=total)
 
 
-@admin_bp.route("/wallet/<tx_id>/approve", methods=["POST"])
-@super_admin_required
-def approve_wallet_tx(tx_id):
+def _process_wallet_approval(tx_id, admin_id):
+    """Core approval logic shared by the single-item and bulk-action routes.
+    Returns (success: bool, message: str)."""
     tx = db_select("wallet_transactions", "*", filters={"id": tx_id}, single=True)
     if not tx or tx["status"] != "pending":
-        flash("Transaction not found or already processed.", "warning")
-        return redirect(url_for("admin.wallet"))
+        return False, "Transaction not found or already processed."
 
     user = db_select("users", "id,balance,email,username",
                      filters={"id": tx["user_id"]}, single=True)
@@ -448,7 +525,7 @@ def approve_wallet_tx(tx_id):
             "status":        "completed",
             "balance_before": bal,
             "balance_after": new_bal,
-            "processed_by":  session["user_id"],
+            "processed_by":  admin_id,
         }, {"id": tx_id})
         db_insert("notifications", {
             "user_id": user["id"], "type": "deposit_approved", "icon": "trending-up",
@@ -462,15 +539,14 @@ def approve_wallet_tx(tx_id):
 
     elif tx["type"] == "withdrawal":
         if float(tx["amount"]) > bal:
-            flash("Insufficient user balance to approve withdrawal.", "danger")
-            return redirect(url_for("admin.wallet"))
+            return False, "Insufficient user balance to approve withdrawal."
         new_bal = bal - float(tx["amount"])
         db_update("users", {"balance": new_bal}, {"id": user["id"]})
         db_update("wallet_transactions", {
             "status":        "completed",
             "balance_before": bal,
             "balance_after": new_bal,
-            "processed_by":  session["user_id"],
+            "processed_by":  admin_id,
         }, {"id": tx_id})
         db_insert("notifications", {
             "user_id": user["id"], "type": "withdrawal_approved", "icon": "trending-down",
@@ -481,14 +557,47 @@ def approve_wallet_tx(tx_id):
         send_withdrawal_processed(user["email"], user["username"],
                                   float(tx["amount"]), "approved")
 
-    log_audit(session["user_id"], f"approve_{tx['type']}", resource_id=tx_id,
-              ip=request.remote_addr, ua=request.user_agent.string)
-    flash("Transaction approved.", "success")
+    log_audit(admin_id, f"approve_{tx['type']}", resource_id=tx_id)
+    return True, "Transaction approved."
+
+
+@admin_bp.route("/wallet/<tx_id>/approve", methods=["POST"])
+@admin_required
+def approve_wallet_tx(tx_id):
+    ok, msg = _process_wallet_approval(tx_id, session["user_id"])
+    flash(msg, "success" if ok else ("warning" if "not found" in msg.lower() else "danger"))
+    return redirect(url_for("admin.wallet"))
+
+
+@admin_bp.route("/wallet/bulk-approve", methods=["POST"])
+@admin_required
+def bulk_approve_wallet():
+    """Approve multiple pending deposits/withdrawals at once. Reuses the
+    exact same per-item logic as approve_wallet_tx via _process_wallet_approval."""
+    tx_ids = request.form.getlist("tx_ids")
+    if not tx_ids:
+        flash("No transactions selected.", "warning")
+        return redirect(url_for("admin.wallet"))
+
+    approved, failed = 0, 0
+    for tx_id in tx_ids:
+        ok, _ = _process_wallet_approval(tx_id, session["user_id"])
+        if ok:
+            approved += 1
+        else:
+            failed += 1
+
+    log_audit(session["user_id"], "bulk_approve_wallet",
+              details={"approved": approved, "failed": failed})
+    msg = f"{approved} transaction(s) approved."
+    if failed:
+        msg += f" {failed} could not be processed (insufficient balance or already handled)."
+    flash(msg, "success" if approved else "warning")
     return redirect(url_for("admin.wallet"))
 
 
 @admin_bp.route("/wallet/<tx_id>/reject", methods=["POST"])
-@super_admin_required
+@admin_required
 def reject_wallet_tx(tx_id):
     note = request.form.get("note", "").strip()
     tx   = db_select("wallet_transactions", "*", filters={"id": tx_id}, single=True)
@@ -513,7 +622,7 @@ def reject_wallet_tx(tx_id):
         "link": "/dashboard/wallet",
     })
     log_audit(session["user_id"], f"reject_{tx['type']}", resource_id=tx_id,
-              details={"note": note}, ip=request.remote_addr, ua=request.user_agent.string)
+              details={"note": note})
     flash("Transaction rejected.", "warning")
     return redirect(url_for("admin.wallet"))
 
@@ -697,12 +806,10 @@ def logs():
     if action_f:
         all_logs = [l for l in all_logs if action_f in (l.get("action") or "")]
 
-    from utils.helpers import parse_user_agent
     for l in all_logs:
         if l.get("user_id"):
-            u = db_select("users", "id,username,role", filters={"id": l["user_id"]}, single=True)
+            u = db_select("users", "id,username", filters={"id": l["user_id"]}, single=True)
             l["user"] = u
-        l["ua_info"] = parse_user_agent(l.get("user_agent"))
 
     per_page  = 50
     total     = len(all_logs)
@@ -728,57 +835,3 @@ def support():
         u = db_select("users", "id,username,email", filters={"id": t["user_id"]}, single=True)
         t["user"] = u
     return render_template("admin/support.html", tickets=tickets, status=status)
-
-
-@admin_bp.route("/support/<ticket_id>")
-@admin_required
-def ticket_detail(ticket_id):
-    ticket = db_select("support_tickets", "*", filters={"id": ticket_id}, single=True)
-    if not ticket:
-        flash("Ticket not found.", "danger")
-        return redirect(url_for("admin.support"))
-    ticket["user"] = db_select("users", "id,username,email", filters={"id": ticket["user_id"]}, single=True)
-    if ticket.get("order_id"):
-        ticket["order"] = db_select("orders", "id,order_number,total,status",
-                                    filters={"id": ticket["order_id"]}, single=True)
-    messages = db_select("ticket_messages", "*", filters={"ticket_id": ticket_id}, order="created_at")
-    for m in messages:
-        m["user"] = db_select("users", "id,username", filters={"id": m["user_id"]}, single=True)
-    return render_template("admin/ticket_detail.html", ticket=ticket, messages=messages)
-
-
-@admin_bp.route("/support/<ticket_id>/reply", methods=["POST"])
-@admin_required
-def reply_ticket(ticket_id):
-    message = request.form.get("message", "").strip()
-    new_status = request.form.get("status", "")
-    ticket = db_select("support_tickets", "*", filters={"id": ticket_id}, single=True)
-    if not ticket:
-        flash("Ticket not found.", "danger")
-        return redirect(url_for("admin.support"))
-
-    if message:
-        db_insert("ticket_messages", {
-            "ticket_id": ticket_id,
-            "user_id":   session["user_id"],
-            "message":   message,
-            "is_staff":  True,
-        })
-        db_insert("notifications", {
-            "user_id": ticket["user_id"], "type": "ticket_reply", "icon": "headphones",
-            "title": f"New reply on ticket {ticket['ticket_number']}",
-            "message": message[:120],
-            "link": "/dashboard/support",
-        })
-
-    update = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    if new_status and new_status in ("open", "in_progress", "waiting_reply", "resolved", "closed"):
-        update["status"] = new_status
-        if new_status == "closed":
-            update["closed_at"] = datetime.now(timezone.utc).isoformat()
-    db_update("support_tickets", update, {"id": ticket_id})
-
-    log_audit(session["user_id"], "reply_ticket", resource_id=ticket_id,
-              ip=request.remote_addr, ua=request.user_agent.string)
-    flash("Reply sent.", "success")
-    return redirect(url_for("admin.ticket_detail", ticket_id=ticket_id))

@@ -36,11 +36,15 @@ def index():
 
     # Recent purchases
     purchases = db_select("orders", "*", filters={"buyer_id": uid}, order="-created_at", limit=5)
-    total_purchases = len(db_select("orders", "id", filters={"buyer_id": uid, "status": "completed"}))
     # Recent sales (if seller)
     sales = []
     if session.get("role") in ("seller", "admin"):
         sales = db_select("orders", "*", filters={"seller_id": uid}, order="-created_at", limit=5)
+
+    # Order counts (for stat grid)
+    all_buyer_orders = db_select("orders", "id,status", filters={"buyer_id": uid})
+    total_orders     = len(all_buyer_orders)
+    total_purchases  = sum(1 for o in all_buyer_orders if o["status"] == "completed")
 
     # Unread notifications count
     all_notifs = db_select("notifications", "id", filters={"user_id": uid, "is_read": False})
@@ -55,15 +59,44 @@ def index():
     total_earned  = sum(float(t["amount"]) for t in tx if t["type"] == "sale")
     total_deposit = sum(float(t["amount"]) for t in tx if t["type"] == "deposit")
 
+    # Recent messages (for activity tab)
+    convos_1 = db_select("conversations", "*", filters={"participant_1": uid}, order="-last_message_at")
+    convos_2 = db_select("conversations", "*", filters={"participant_2": uid}, order="-last_message_at")
+    recent_messages = (convos_1 + convos_2)
+    recent_messages.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
+    recent_messages = recent_messages[:6]
+    for c in recent_messages:
+        other_id = c["participant_2"] if c["participant_1"] == uid else c["participant_1"]
+        other    = db_select("users", "id,username", filters={"id": other_id}, single=True)
+        c["other_user"] = other
+
+    # Recent notifications (for activity tab)
+    recent_notifications = db_select("notifications", "*", filters={"user_id": uid},
+                                     order="-created_at", limit=6)
+
+    # Recent wishlist adds (for activity tab)
+    recent_wishlist_rows = db_select("wishlist", "*", filters={"user_id": uid},
+                                     order="-created_at", limit=6)
+    recent_wishlist = []
+    for row in recent_wishlist_rows:
+        listing = db_select("listings", "id,title,slug,price,preview_images",
+                            filters={"id": row["listing_id"]}, single=True)
+        if listing:
+            recent_wishlist.append(listing)
+
     return render_template("dashboard/index.html",
         user=user, profile=prof,
         purchases=purchases, sales=sales,
+        total_orders=total_orders,
         total_purchases=total_purchases,
         unread_notifications=len(all_notifs),
         wishlist_count=len(wl),
         total_spent=total_spent,
         total_earned=total_earned,
         total_deposit=total_deposit,
+        recent_messages=recent_messages,
+        recent_notifications=recent_notifications,
+        recent_wishlist=recent_wishlist,
     )
 
 
@@ -190,14 +223,8 @@ def orders():
         filters["status"] = status
 
     all_orders = db_select("orders", "*", filters=filters, order="-created_at")
-    for o in all_orders:
-        o["order_items"] = db_select("order_items", "title", filters={"order_id": o["id"]})
-
     if search:
-        all_orders = [o for o in all_orders if
-                      search in o["id"].lower()
-                      or search in (o.get("order_number") or "").lower()
-                      or any(search in (it.get("title") or "").lower() for it in o["order_items"])]
+        all_orders = [o for o in all_orders if search in (o.get("order_number") or "").lower()]
 
     per_page   = 20
     total      = len(all_orders)
@@ -214,12 +241,16 @@ def orders():
 @dashboard_bp.route("/purchases")
 @login_required
 def purchases():
-    uid  = session["user_id"]
-    page = int(request.args.get("page", 1))
+    uid    = session["user_id"]
+    page   = int(request.args.get("page", 1))
+    search = request.args.get("q", "").strip().lower()
 
     completed = db_select("orders", "*",
                           filters={"buyer_id": uid, "status": "completed"},
                           order="-created_at")
+    if search:
+        completed = [o for o in completed if search in (o.get("order_number") or "").lower()]
+
     per_page  = 20
     total     = len(completed)
     start     = (page - 1) * per_page
@@ -228,10 +259,10 @@ def purchases():
 
     # Enrich with order items
     for order in paginated:
-        order["order_items"] = db_select("order_items", "*", filters={"order_id": order["id"]})
+        order["items"] = db_select("order_items", "*", filters={"order_id": order["id"]})
 
     return render_template("dashboard/purchases.html",
-        orders=paginated, page=page, pages=pages, total=total)
+        orders=paginated, search=search, page=page, pages=pages, total=total)
 
 
 @dashboard_bp.route("/purchases/<order_item_id>/download")
@@ -289,6 +320,10 @@ def messages():
         c["other_avatar"] = op.get("avatar_url") if op else None
         c["unread"]       = (c["unread_count_1"] if c["participant_1"] == uid
                              else c["unread_count_2"])
+        # Last message preview text (for the conversation list)
+        last_msgs = db_select("messages", "content,sender_id",
+                              filters={"conversation_id": c["id"]}, order="-created_at", limit=1)
+        c["last_preview"] = (last_msgs[0]["content"] if last_msgs else "")
 
     active_id = request.args.get("conversation")
     chat      = []
@@ -362,17 +397,20 @@ def send_message():
 @dashboard_bp.route("/notifications")
 @login_required
 def notifications():
-    uid   = session["user_id"]
-    page  = int(request.args.get("page", 1))
+    uid    = session["user_id"]
+    page   = int(request.args.get("page", 1))
+    filt   = request.args.get("filter", "")
     notifs = db_select("notifications", "*", filters={"user_id": uid}, order="-created_at")
+    unread = sum(1 for n in notifs if not n["is_read"])
+    if filt == "unread":
+        notifs = [n for n in notifs if not n["is_read"]]
     per_page = 30
     total    = len(notifs)
     start    = (page - 1) * per_page
     paginated = notifs[start: start + per_page]
     pages     = max(1, -(-total // per_page))
-    unread    = sum(1 for n in notifs if not n["is_read"])
     return render_template("dashboard/notifications.html",
-        notifications=paginated, unread=unread, page=page, pages=pages, total=total)
+        notifications=paginated, unread=unread, filt=filt, page=page, pages=pages, total=total)
 
 
 @dashboard_bp.route("/notifications/mark-all-read", methods=["POST"])
@@ -393,11 +431,46 @@ def wishlist():
     listings = []
     for item in items:
         listing = db_select("listings",
-                            "id,title,slug,price,compare_price,rating,preview_images",
+                            "id,title,slug,price,compare_price,rating,preview_images,status,is_approved",
                             filters={"id": item["listing_id"]}, single=True)
         if listing:
+            listing["wishlist_id"] = item["id"]
             listings.append(listing)
     return render_template("dashboard/wishlist.html", listings=listings)
+
+
+@dashboard_bp.route("/wishlist/add-all-to-cart", methods=["POST"])
+@login_required
+def wishlist_add_all_to_cart():
+    """Bulk-add every available wishlist item to the cart. Reuses cart_items
+    exactly like marketplace.cart_add — no new tables or columns involved."""
+    uid   = session["user_id"]
+    items = db_select("wishlist", "*", filters={"user_id": uid})
+    max_cart = current_app.config.get("MAX_CART_ITEMS", 20)
+
+    existing_cart = db_select("cart_items", "listing_id", filters={"user_id": uid})
+    existing_ids  = {c["listing_id"] for c in existing_cart}
+    room_left     = max_cart - len(existing_cart)
+
+    added = 0
+    for item in items:
+        if room_left <= 0:
+            break
+        if item["listing_id"] in existing_ids:
+            continue
+        listing = db_select("listings", "id,status,is_approved",
+                            filters={"id": item["listing_id"]}, single=True)
+        if not listing or listing["status"] != "active" or not listing["is_approved"]:
+            continue
+        db_insert("cart_items", {"user_id": uid, "listing_id": item["listing_id"]})
+        added += 1
+        room_left -= 1
+
+    if added:
+        flash(f"Added {added} item(s) to your cart.", "success")
+    else:
+        flash("Nothing to add — items are already in your cart or unavailable.", "info")
+    return redirect(url_for("marketplace.cart"))
 
 
 # ── Settings ──────────────────────────────────────────────────

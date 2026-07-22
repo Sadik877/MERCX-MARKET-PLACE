@@ -157,73 +157,6 @@
 </section>
 {% endif %}
 
-<!-- ── New Arrivals ────────────────────────────────────────────── -->
-{% if newest %}
-<section style="padding:2rem 1.5rem 5rem;max-width:1400px;margin:0 auto">
-  <div class="flex items-center justify-between mb-8 reveal">
-    <div>
-      <h2 class="font-display text-2xl font-bold mb-1">🆕 New Arrivals</h2>
-      <p style="font-size:.88rem;color:var(--text-muted)">Freshly added to the marketplace</p>
-    </div>
-    <a href="{{ url_for('marketplace.index') }}?sort=newest" class="btn btn-outline btn-sm">View All</a>
-  </div>
-  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-    {% for listing in newest %}
-    <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" class="product-card reveal" style="text-decoration:none">
-      {% if listing.preview_images %}
-        <img src="{{ listing.preview_images[0] }}" alt="{{ listing.title }}" class="product-card__img" loading="lazy">
-      {% else %}
-        <div class="product-card__img-placeholder">
-          <i data-feather="image" style="width:32px;height:32px;opacity:.3"></i>
-        </div>
-      {% endif %}
-      <div class="product-card__body">
-        <span class="badge badge-accent" style="align-self:flex-start">New</span>
-        <div class="product-card__title">{{ listing.title }}</div>
-        <div class="product-card__rating">
-          <span style="color:#F59E0B">★</span>
-          {{ '%.1f'|format(listing.rating|float) }}
-          <span style="color:var(--text-dim)">({{ listing.review_count or 0 }})</span>
-        </div>
-        <span class="product-card__price">${{ '%.2f'|format(listing.price|float) }}</span>
-      </div>
-    </a>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-<!-- ── Top Sellers ─────────────────────────────────────────────── -->
-{% if top_sellers %}
-<section style="padding:2rem 1.5rem 5rem;max-width:1400px;margin:0 auto">
-  <div class="text-center mb-10 reveal">
-    <h2 class="font-display text-3xl font-bold mb-3">Meet Our Top Sellers</h2>
-    <p style="color:var(--text-muted)">Verified creators trusted by thousands of buyers</p>
-  </div>
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-    {% for seller in top_sellers if seller.store_slug %}
-    <a href="{{ url_for('marketplace.seller_store', store_slug=seller.store_slug) }}" class="seller-card reveal" style="text-decoration:none">
-      {% if seller.avatar_url %}
-        <img src="{{ seller.avatar_url }}" alt="{{ seller.store_name }}" class="seller-card__avatar">
-      {% else %}
-        <div class="seller-card__avatar">{{ (seller.store_name or 'S')[0]|upper }}</div>
-      {% endif %}
-      <div class="seller-card__name">
-        {{ seller.store_name or 'Store' }}
-        {% if seller.seller_verified %}
-        <i data-feather="check-circle" style="width:14px;height:14px;color:var(--accent)"></i>
-        {% endif %}
-      </div>
-      <div class="seller-card__meta">
-        <span style="color:#F59E0B">★</span> {{ '%.1f'|format(seller.seller_rating|float) }}
-        · {{ seller.total_sales or 0 }} sales
-      </div>
-    </a>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
 <!-- ── How It Works ────────────────────────────────────────────── -->
 <section style="padding:5rem 1.5rem;background:var(--bg-card);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
   <div style="max-width:1100px;margin:0 auto">
@@ -248,31 +181,6 @@
       </div>
       {% endfor %}
     </div>
-  </div>
-</section>
-
-<!-- ── Trust & Security ────────────────────────────────────────── -->
-<section style="padding:5rem 1.5rem;max-width:1300px;margin:0 auto">
-  <div class="text-center mb-14 reveal">
-    <h2 class="font-display text-3xl font-bold mb-3">Built on Trust & Security</h2>
-    <p style="color:var(--text-muted);max-width:560px;margin:0 auto">Every purchase on MercX is backed by buyer protection, verified sellers, and secure checkout.</p>
-  </div>
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-    {% set trust_items = [
-      ('lock','Secure Checkout','Every transaction is encrypted end-to-end, with no card details ever touching our servers.','var(--primary)'),
-      ('shield','Buyer Protection','Full or partial refunds if a product doesn’t match its listing, backed by our dispute process.','var(--accent)'),
-      ('user-check','Verified Sellers','Sellers earn a verification badge after meeting sales, rating, and identity requirements.','var(--success)'),
-      ('life-buoy','Dispute Resolution','Our support team reviews disputes and can issue refunds directly from order records.','var(--warning)'),
-    ] %}
-    {% for icon, title, desc, color in trust_items %}
-    <div class="trust-card reveal">
-      <div class="trust-card__icon" style="background:{{ color }}22;color:{{ color }}">
-        <i data-feather="{{ icon }}" style="width:24px;height:24px"></i>
-      </div>
-      <h3 class="font-display text-lg font-bold mb-2">{{ title }}</h3>
-      <p style="color:var(--text-muted);font-size:.88rem;line-height:1.65">{{ desc }}</p>
-    </div>
-    {% endfor %}
   </div>
 </section>
 
@@ -305,63 +213,6 @@
       </div>
       {% endfor %}
     </div>
-  </div>
-</section>
-
-<!-- ── Testimonials ────────────────────────────────────────────── -->
-<section style="padding:5rem 1.5rem;background:var(--bg-card);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-  <div style="max-width:1300px;margin:0 auto">
-    <div class="text-center mb-14 reveal">
-      <h2 class="font-display text-3xl font-bold mb-3">What Creators & Buyers Say</h2>
-      <p style="color:var(--text-muted)">Sample feedback from the MercX community</p>
-    </div>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      {% set testimonials = [
-        ('J', 'Jordan M.', 'Buyer', 'Instant delivery and clear licensing made it easy to know exactly what I was buying before checkout.'),
-        ('A', 'Aisha K.', 'Seller', 'Setting up my store took minutes, and the seller dashboard makes it simple to track sales and payouts.'),
-        ('D', 'Diego R.', 'Buyer', 'When a listing didn’t match the description, the dispute process got me a refund without any hassle.'),
-      ] %}
-      {% for initial, name, role, quote in testimonials %}
-      <div class="testimonial-card reveal">
-        <p class="testimonial-card__quote">“{{ quote }}”</p>
-        <div class="testimonial-card__author">
-          <div class="testimonial-card__avatar">{{ initial }}</div>
-          <div>
-            <div style="font-weight:600;font-size:.9rem">{{ name }}</div>
-            <div style="font-size:.78rem;color:var(--text-muted)">{{ role }}</div>
-          </div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-</section>
-
-<!-- ── FAQ ──────────────────────────────────────────────────────── -->
-<section style="padding:5rem 1.5rem;max-width:800px;margin:0 auto">
-  <div class="text-center mb-12 reveal">
-    <h2 class="font-display text-3xl font-bold mb-3">Frequently Asked Questions</h2>
-    <p style="color:var(--text-muted)">Everything you need to know about buying and selling on MercX</p>
-  </div>
-  <div class="space-y-3" data-faq-group>
-    {% set faqs = [
-      ('How do I receive my purchase?', 'Most digital products are delivered instantly after checkout. You can access and re-download your files anytime from your Purchases page, subject to the download limit set by the seller.'),
-      ('What happens if a product isn’t what I expected?', 'You can open a dispute from your order, describing the issue. Our team reviews the order details and can issue a full or partial refund when the listing doesn’t match what was delivered.'),
-      ('How do I become a seller?', 'Create a free account, then apply to become a seller from your dashboard. Once approved, you can create listings, set pricing, and start receiving orders — with no upfront listing fees.'),
-      ('How do sellers get paid?', 'Earnings from completed orders are added to your seller wallet, minus the platform fee. From there you can request a withdrawal from your Wallet page.'),
-      ('Is my payment information secure?', 'Yes. Checkout is handled through secure, encrypted payment processing, and MercX never stores your full card details on its own servers.'),
-    ] %}
-    {% for question, answer in faqs %}
-    <div class="faq-item reveal">
-      <div class="faq-question">
-        <span>{{ question }}</span>
-        <i data-feather="chevron-down" class="faq-chevron" style="width:18px;height:18px"></i>
-      </div>
-      <div class="faq-answer">
-        <div class="faq-answer__inner">{{ answer }}</div>
-      </div>
-    </div>
-    {% endfor %}
   </div>
 </section>
 

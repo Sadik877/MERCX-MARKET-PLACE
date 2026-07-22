@@ -393,110 +393,6 @@ function initConfirmForms() {
 }
 
 
-/* ── Styled Confirm Modal (delete confirmations) ────────────── */
-function initConfirmModal() {
-  const modal = document.getElementById('confirm-modal');
-  if (!modal) return;
-  const titleEl = document.getElementById('confirm-modal-title');
-  const bodyEl  = document.getElementById('confirm-modal-body');
-  const okBtn   = document.getElementById('confirm-modal-ok');
-  let pendingForm = null;
-
-  document.addEventListener('click', e => {
-    const trigger = e.target.closest('[data-confirm-modal]');
-    if (!trigger) return;
-    e.preventDefault();
-    pendingForm = trigger.closest('form') || null;
-    titleEl.textContent = trigger.dataset.confirmTitle || 'Are you sure?';
-    bodyEl.textContent  = trigger.dataset.confirmModal || 'This action cannot be undone.';
-    modal.classList.remove('hidden');
-  });
-
-  okBtn?.addEventListener('click', () => {
-    modal.classList.add('hidden');
-    if (pendingForm) pendingForm.submit();
-    pendingForm = null;
-  });
-
-  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
-  document.getElementById('confirm-modal-cancel')?.addEventListener('click', () => modal.classList.add('hidden'));
-}
-
-
-/* ── Grid / List View Toggle ─────────────────────────────────── */
-function initViewToggle() {
-  const toggle = document.querySelector('[data-view-toggle]');
-  const container = document.getElementById('product-list');
-  if (!toggle || !container) return;
-  const KEY = 'mercx_product_view';
-  const saved = localStorage.getItem(KEY) || 'grid';
-  applyView(saved);
-
-  toggle.addEventListener('click', e => {
-    const btn = e.target.closest('[data-view]');
-    if (!btn) return;
-    applyView(btn.dataset.view);
-    localStorage.setItem(KEY, btn.dataset.view);
-  });
-
-  function applyView(view) {
-    container.classList.toggle('view-list', view === 'list');
-    container.classList.toggle('view-grid', view !== 'list');
-    toggle.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-  }
-}
-
-
-/* ── Bulk Product Actions ────────────────────────────────────── */
-function initBulkActions() {
-  const bar = document.getElementById('bulk-bar');
-  const countEl = document.getElementById('bulk-count');
-  const selectAll = document.getElementById('bulk-select-all');
-  if (!bar) return;
-
-  function checkboxes() { return Array.from(document.querySelectorAll('.bulk-checkbox')); }
-  function selected() { return checkboxes().filter(c => c.checked); }
-
-  function refresh() {
-    const n = selected().length;
-    bar.classList.toggle('hidden', n === 0);
-    if (countEl) countEl.textContent = n;
-  }
-
-  document.addEventListener('change', e => {
-    if (e.target.classList.contains('bulk-checkbox')) refresh();
-  });
-
-  selectAll?.addEventListener('change', () => {
-    checkboxes().forEach(c => { c.checked = selectAll.checked; });
-    refresh();
-  });
-
-  document.querySelectorAll('[data-bulk-action]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const ids = selected().map(c => c.value);
-      if (!ids.length) return;
-      const action = btn.dataset.bulkAction; // url template containing {id}
-      if (!confirm(`Apply "${btn.textContent.trim()}" to ${ids.length} product(s)?`)) return;
-      btn.disabled = true;
-      const csrf = getCsrf();
-      for (const id of ids) {
-        try {
-          await fetch(action.replace('{id}', id), {
-            method: 'POST',
-            headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `csrf_token=${encodeURIComponent(csrf)}`
-          });
-        } catch (err) { console.error('Bulk action failed for', id, err); }
-      }
-      location.reload();
-    });
-  });
-
-  refresh();
-}
-
-
 /* ── Dropdown Menus ─────────────────────────────────────────── */
 function initDropdowns() {
   document.addEventListener('click', e => {
@@ -519,188 +415,16 @@ function initTabs() {
   document.querySelectorAll('[data-tab-group]').forEach(group => {
     const tabs    = group.querySelectorAll('[data-tab]');
     const panels  = group.querySelectorAll('[data-panel]');
-
-    function activate(tab) {
-      tabs.forEach(t => t.classList.remove('active'));
-      panels.forEach(p => p.classList.add('hidden'));
-      tab.classList.add('active');
-      const panel = group.querySelector(`[data-panel="${tab.dataset.tab}"]`);
-      panel?.classList.remove('hidden');
-    }
-
     tabs.forEach(tab => {
-      tab.addEventListener('click', () => activate(tab));
-    });
-
-    // Support deep-linking via URL hash, e.g. /settings#password
-    const hash = location.hash.replace('#', '');
-    if (hash) {
-      const match = Array.from(tabs).find(t => t.dataset.tab === hash);
-      if (match) activate(match);
-    }
-  });
-}
-
-
-/* ── FAQ Accordion ──────────────────────────────────────────── */
-function initFaq() {
-  document.querySelectorAll('.faq-item').forEach(item => {
-    const question = item.querySelector('.faq-question');
-    const answer   = item.querySelector('.faq-answer');
-    if (!question || !answer) return;
-    question.addEventListener('click', () => {
-      const isOpen = item.classList.contains('open');
-      item.closest('[data-faq-group]')?.querySelectorAll('.faq-item').forEach(other => {
-        if (other !== item) { other.classList.remove('open'); other.querySelector('.faq-answer').style.maxHeight = null; }
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        panels.forEach(p => p.classList.add('hidden'));
+        tab.classList.add('active');
+        const panel = group.querySelector(`[data-panel="${tab.dataset.tab}"]`);
+        panel?.classList.remove('hidden');
       });
-      if (isOpen) {
-        item.classList.remove('open');
-        answer.style.maxHeight = null;
-      } else {
-        item.classList.add('open');
-        answer.style.maxHeight = answer.scrollHeight + 'px';
-      }
     });
   });
-}
-
-
-/* ── Mobile Filter Drawer ───────────────────────────────────── */
-function initFilterDrawer() {
-  const openBtn  = document.getElementById('filter-drawer-open');
-  const drawer   = document.getElementById('filter-drawer');
-  const backdrop = document.getElementById('filter-drawer-backdrop');
-  const closeBtn = document.getElementById('filter-drawer-close');
-  if (!openBtn || !drawer || !backdrop) return;
-
-  function open()  { drawer.classList.remove('hidden'); backdrop.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-  function close() { drawer.classList.add('hidden'); backdrop.classList.add('hidden'); document.body.style.overflow = ''; }
-
-  openBtn.addEventListener('click', open);
-  closeBtn?.addEventListener('click', close);
-  backdrop.addEventListener('click', close);
-}
-
-
-/* ── Quick View Modal ───────────────────────────────────────── */
-function initQuickView() {
-  const modal = document.getElementById('quick-view-modal');
-  if (!modal) return;
-  const body = document.getElementById('quick-view-body');
-
-  document.addEventListener('click', e => {
-    const btn = e.target.closest('[data-quick-view]');
-    if (!btn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const d = btn.dataset;
-    body.innerHTML = `
-      <img src="${d.image || ''}" class="quick-view-img" alt="${d.title}" onerror="this.style.display='none'">
-      <div>
-        <h3 class="font-display font-bold text-xl mb-2">${d.title}</h3>
-        <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.75rem;font-size:.85rem;color:var(--text-muted)">
-          <span style="color:#F59E0B">★</span> ${d.rating} <span style="color:var(--text-dim)">(${d.reviews} reviews)</span>
-        </div>
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.5rem;color:var(--primary-light);margin-bottom:1.25rem">$${d.price}</div>
-        <a href="${d.href}" class="btn btn-primary w-full justify-center">View Full Details</a>
-      </div>`;
-    modal.classList.remove('hidden');
-    if (window.feather) feather.replace({ 'stroke-width': 1.75 });
-  });
-
-  document.getElementById('quick-view-close')?.addEventListener('click', () => modal.classList.add('hidden'));
-  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
-}
-
-
-/* ── Recent Searches (localStorage) ─────────────────────────── */
-function initRecentSearches() {
-  const form  = document.getElementById('search-form');
-  const list  = document.getElementById('recent-searches');
-  if (!list) return;
-  const KEY = 'mercx_recent_searches';
-
-  function render() {
-    let recent = [];
-    try { recent = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch {}
-    if (!recent.length) { list.innerHTML = ''; list.classList.add('hidden'); return; }
-    list.classList.remove('hidden');
-    list.innerHTML = recent.map(q => `<button type="button" class="search-chip" data-recent-q="${q}">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      ${q}</button>`).join('');
-  }
-
-  list.addEventListener('click', e => {
-    const chip = e.target.closest('[data-recent-q]');
-    if (!chip) return;
-    const input = form?.querySelector('input[name="q"]');
-    if (input) { input.value = chip.dataset.recentQ; form.submit(); }
-  });
-
-  form?.addEventListener('submit', () => {
-    const q = form.querySelector('input[name="q"]')?.value.trim();
-    if (!q) return;
-    let recent = [];
-    try { recent = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch {}
-    recent = [q, ...recent.filter(x => x.toLowerCase() !== q.toLowerCase())].slice(0, 6);
-    localStorage.setItem(KEY, JSON.stringify(recent));
-  });
-
-  render();
-}
-
-
-/* ── Theme Toggle ───────────────────────────────────────────── */
-function initThemeToggle() {
-  const btn = document.getElementById('theme-toggle');
-  if (!btn) return;
-  const iconDark = document.getElementById('theme-icon-dark');
-  const iconLight = document.getElementById('theme-icon-light');
-  const KEY = 'mercx_theme';
-
-  function applyIcons(theme) {
-    if (iconDark) iconDark.style.display = theme === 'light' ? 'none' : '';
-    if (iconLight) iconLight.style.display = theme === 'light' ? '' : 'none';
-  }
-
-  // The inline <head> script already applied the saved theme before paint;
-  // this just syncs the icon and wires up the click handler.
-  applyIcons(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
-
-  btn.addEventListener('click', () => {
-    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-    const next = isLight ? 'dark' : 'light';
-    if (next === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-      document.documentElement.classList.remove('dark');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-      document.documentElement.classList.add('dark');
-    }
-    localStorage.setItem(KEY, next);
-    applyIcons(next);
-  });
-}
-
-
-/* ── Relative Timestamps ─────────────────────────────────────── */
-function initRelativeTime() {
-  const els = document.querySelectorAll('[data-relative-time]');
-  if (!els.length) return;
-
-  function relativeTime(iso) {
-    const then = new Date(iso).getTime();
-    if (isNaN(then)) return '';
-    const diff = Math.floor((Date.now() - then) / 1000);
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
-    if (diff < 2592000) return Math.floor(diff / 604800) + 'w ago';
-    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  }
-
-  els.forEach(el => { el.textContent = relativeTime(el.dataset.relativeTime); });
 }
 
 
@@ -728,15 +452,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initConfirmForms();
   initDropdowns();
   initTabs();
-  initFaq();
-  initFilterDrawer();
-  initQuickView();
-  initRecentSearches();
-  initConfirmModal();
-  initViewToggle();
-  initBulkActions();
-  initRelativeTime();
-  initThemeToggle();
 
   // Refresh badges if logged in
   const isLoggedIn = document.body.dataset.loggedIn === 'true';
@@ -753,3 +468,124 @@ window.MercX.markAllNotifsRead = markAllNotifsRead;
 window.MercX.markNotifRead     = markNotifRead;
 window.MercX.fmtPrice          = fmtPrice;
 window.MercX.getCsrf           = getCsrf;
+
+
+/* ============================================================
+   Phase 3 — Seller Dashboard Redesign (appended, additive only)
+   ============================================================ */
+
+/* ── Sidebar inline message badge ───────────────────────────── */
+async function refreshInlineMessageBadge() {
+  try {
+    const res = await fetch('/api/messages/unread-count');
+    if (!res.ok) return;
+    const { count } = await res.json();
+    document.querySelectorAll('[data-notif-badge-inline]').forEach(el => {
+      if (count > 0) {
+        el.textContent = count > 99 ? '99+' : count;
+        el.style.cssText = 'background:#7C3AED;color:#fff;border-radius:99px;' +
+          'font-size:.68rem;font-weight:700;padding:.05rem .45rem;';
+      } else {
+        el.textContent = '';
+      }
+    });
+  } catch {}
+}
+
+/* ── Product grid/list view toggle (persisted) ──────────────── */
+function initViewToggle() {
+  const toggle = document.getElementById('view-toggle');
+  if (!toggle) return;
+  const gridEl = document.getElementById('product-grid-view');
+  const listEl = document.getElementById('product-list-view');
+  const gridBtn = document.getElementById('view-grid-btn');
+  const listBtn = document.getElementById('view-list-btn');
+  if (!gridEl || !listEl) return;
+
+  function setMode(mode) {
+    if (mode === 'list') {
+      gridEl.classList.add('hidden'); listEl.classList.remove('hidden');
+      gridBtn?.classList.remove('active'); listBtn?.classList.add('active');
+    } else {
+      listEl.classList.add('hidden'); gridEl.classList.remove('hidden');
+      listBtn?.classList.remove('active'); gridBtn?.classList.add('active');
+    }
+    try { localStorage.setItem('mercx_seller_view_mode', mode); } catch {}
+  }
+
+  let saved = 'grid';
+  try { saved = localStorage.getItem('mercx_seller_view_mode') || 'grid'; } catch {}
+  setMode(saved);
+
+  gridBtn?.addEventListener('click', () => setMode('grid'));
+  listBtn?.addEventListener('click', () => setMode('list'));
+}
+
+/* ── Bulk select for product management ─────────────────────── */
+function initBulkSelect() {
+  const selectAll = document.getElementById('bulk-select-all');
+  const bar       = document.getElementById('bulk-action-bar');
+  const countEl   = document.getElementById('bulk-selected-count');
+  const form      = document.getElementById('bulk-action-form');
+  if (!selectAll || !bar || !form) return;
+
+  function checkboxes() { return document.querySelectorAll('.bulk-checkbox'); }
+
+  function refresh() {
+    const checked = Array.from(checkboxes()).filter(c => c.checked);
+    bar.classList.toggle('hidden', checked.length === 0);
+    if (countEl) countEl.textContent = checked.length;
+  }
+
+  selectAll.addEventListener('change', () => {
+    checkboxes().forEach(c => { c.checked = selectAll.checked; });
+    refresh();
+  });
+
+  document.addEventListener('change', e => {
+    if (e.target.classList && e.target.classList.contains('bulk-checkbox')) refresh();
+  });
+
+  form.addEventListener('submit', e => {
+    // Inject checked listing IDs as hidden inputs before submit
+    document.querySelectorAll('input[name="listing_ids"][type="hidden"]').forEach(el => el.remove());
+    const checked = Array.from(checkboxes()).filter(c => c.checked);
+    if (checked.length === 0) { e.preventDefault(); return; }
+    checked.forEach(c => {
+      const input = document.createElement('input');
+      input.type = 'hidden'; input.name = 'listing_ids'; input.value = c.value;
+      form.appendChild(input);
+    });
+  });
+}
+
+function setBulkAction(action, label) {
+  const actionInput = document.getElementById('bulk-action-input');
+  if (!actionInput) return;
+  if (action === 'delete') {
+    if (!confirm(`Delete the selected products? This cannot be undone.`)) return;
+  }
+  actionInput.value = action;
+  document.getElementById('bulk-action-form')?.requestSubmit();
+}
+window.setBulkAction = setBulkAction;
+
+/* ── Custom delete-confirmation modal (nicer than window.confirm) ── */
+function initDeleteModals() {
+  document.querySelectorAll('[data-delete-modal-trigger]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      const modalId = btn.dataset.deleteModalTrigger;
+      const modal = document.getElementById(modalId);
+      modal?.classList.remove('hidden');
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshInlineMessageBadge();
+  setInterval(refreshInlineMessageBadge, 60000);
+  initViewToggle();
+  initBulkSelect();
+  initDeleteModals();
+});

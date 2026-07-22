@@ -49,26 +49,6 @@ def create_app():
     app.jinja_env.filters["truncate_text"]   = truncate
     app.jinja_env.filters["discount_pct"]    = calc_discount_pct
 
-    # ── Enforce bans/locks in real time, not just at login ────
-    # A ban applied while a user has an active session previously had no
-    # effect until that session expired on its own (found via live request
-    # testing). One extra indexed lookup per authenticated request is a
-    # small, worthwhile cost for this.
-    @app.before_request
-    def enforce_account_status():
-        uid = session.get("user_id")
-        if not uid:
-            return
-        if request.endpoint in ("static",):
-            return
-        from utils.supabase_client import db_select
-        user = db_select("users", "is_banned", filters={"id": uid}, single=True)
-        if user and user.get("is_banned"):
-            session.clear()
-            from flask import flash, redirect, url_for
-            flash("Your account has been suspended. Contact support if you believe this is a mistake.", "danger")
-            return redirect(url_for("auth.login"))
-
     # ── Template Context Processor ────────────────────────────
     @app.context_processor
     def inject_globals():

@@ -5,37 +5,38 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
   <div class="lg:col-span-2">
     <div class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap" style="border:none">
-      <table class="table">
-        <thead><tr><th>Category</th><th>Listings</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-        {% for cat in categories %}
-        <tr>
-          <td>
-            <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:{{ cat.color }}22;color:{{ cat.color }}">
-                <i data-feather="{{ cat.icon or 'package' }}" style="width:14px;height:14px"></i>
+      {% if categories %}
+      <div class="table-wrap responsive-cards" style="border:none">
+        <table class="table">
+          <thead><tr><th>Category</th><th>Listings</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for cat in categories %}
+          <tr>
+            <td data-label="Category">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:{{ cat.color }}22;color:{{ cat.color }}">
+                  <i data-feather="{{ cat.icon or 'package' }}" style="width:14px;height:14px"></i>
+                </div>
+                <span class="font-semibold text-sm">{{ cat.name }}</span>
               </div>
-              <span class="font-semibold text-sm">{{ cat.name }}</span>
-            </div>
-          </td>
-          <td style="color:var(--text-muted)">{{ cat.listing_count or 0 }}</td>
-          <td><span class="badge badge-{{ 'success' if cat.is_active else 'neutral' }}">{{ 'Active' if cat.is_active else 'Inactive' }}</span></td>
-          <td>
-            <form method="POST" action="{{ url_for('admin.delete_category', cat_id=cat.id) }}" data-confirm="Delete '{{ cat.name }}'?">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-ghost btn-sm p-2" style="color:var(--danger)"><i data-feather="trash-2" style="width:14px;height:14px"></i></button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+            </td>
+            <td data-label="Listings" style="color:var(--text-muted)">{{ cat.listing_count or 0 }}</td>
+            <td data-label="Status"><span class="badge badge-{{ 'success' if cat.is_active else 'neutral' }}">{{ 'Active' if cat.is_active else 'Inactive' }}</span></td>
+            <td data-label="">
+              <form method="POST" action="{{ url_for('admin.delete_category', cat_id=cat.id) }}" data-confirm="Delete '{{ cat.name }}'?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-ghost btn-sm p-2" style="color:var(--danger)"><i data-feather="trash-2" style="width:14px;height:14px"></i></button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% if not categories %}
-      <div style="text-align:center;padding:3rem">
-        <i data-feather="grid" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
-        <p style="color:var(--text-muted)">No categories yet. Add your first one.</p>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon-wrap"><i data-feather="grid" style="width:28px;height:28px"></i></div>
+        <h4>No categories yet</h4><p>Add your first category using the form.</p>
       </div>
       {% endif %}
     </div>

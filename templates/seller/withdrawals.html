@@ -1,0 +1,122 @@
+{% extends 'seller/base.html' %}
+{% block title %}Withdrawals — MercX Digital{% endblock %}
+{% block page_content %}
+<h1 class="font-display text-2xl font-bold mb-6">Withdrawals</h1>
+
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+  <div class="wallet-card reveal" style="padding:1.5rem">
+    <p style="position:relative;z-index:1;font-size:.72rem;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.08em;font-family:'Space Grotesk',sans-serif;margin-bottom:.4rem">Available Balance</p>
+    <div style="position:relative;z-index:1" class="font-display font-bold text-2xl gradient-text">${{ '%.2f'|format(available_balance|float) }}</div>
+    <button onclick="document.getElementById('withdraw-modal').classList.remove('hidden')"
+            style="position:relative;z-index:1;font-size:.78rem;color:#a78bfa;background:none;border:none;cursor:pointer;padding:0;display:inline-block;margin-top:.5rem">
+      Request withdrawal →
+    </button>
+  </div>
+  <div class="stat-pill reveal">
+    <div class="label">Pending Balance</div>
+    <div class="value" style="color:var(--warning)">${{ '%.2f'|format(pending_balance|float) }}</div>
+    <div class="sub">Not yet available (order in progress)</div>
+  </div>
+  <div class="stat-pill reveal">
+    <div class="label">Total Withdrawn</div>
+    <div class="value" style="color:var(--success)">${{ '%.2f'|format(total_withdrawn|float) }}</div>
+    <div class="sub">{{ completed_tx|length }} completed withdrawal{{ 's' if completed_tx|length != 1 }}</div>
+  </div>
+</div>
+
+<div class="flex justify-end mb-5">
+  <button onclick="document.getElementById('withdraw-modal').classList.remove('hidden')" class="btn btn-primary">
+    <i data-feather="trending-down" style="width:16px;height:16px"></i> Request Withdrawal
+  </button>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <!-- Pending requests with status timeline -->
+  <div class="card lg:col-span-1 reveal">
+    <h3 class="font-display font-bold mb-4">Pending Requests</h3>
+    {% if pending_tx %}
+    <div class="timeline">
+      {% for tx in pending_tx %}
+      <div class="timeline-item">
+        <div class="timeline-dot" style="background:rgba(245,158,11,.2)"><i data-feather="clock" style="width:10px;height:10px;color:#F59E0B"></i></div>
+        <div class="font-semibold text-sm">${{ '%.2f'|format(tx.amount|float) }}</div>
+        <div style="font-size:.76rem;color:var(--text-muted)">{{ tx.payment_method or 'bank_transfer' }} · {{ tx.created_at[:10] }}</div>
+        <span class="badge badge-warning mt-1">Awaiting approval</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding:2rem 1rem">
+      <div class="icon-wrap"><i data-feather="clock" style="width:22px;height:22px"></i></div>
+      <h4>No pending requests</h4><p>New withdrawal requests will show up here while awaiting admin approval.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Full history -->
+  <div class="card lg:col-span-2 reveal">
+    <h3 class="font-display font-bold mb-4">Withdrawal History</h3>
+    {% if all_tx %}
+    <div class="table-wrap responsive-cards" style="border:none">
+      <table class="table">
+        <thead><tr><th>Amount</th><th>Method</th><th>Reference</th><th>Date</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for tx in all_tx %}
+        <tr>
+          <td data-label="Amount" class="font-semibold font-mono">${{ '%.2f'|format(tx.amount|float) }}</td>
+          <td data-label="Method" style="font-size:.82rem;color:var(--text-muted)">{{ tx.payment_method or '—' }}</td>
+          <td data-label="Reference" style="font-size:.75rem;color:var(--text-dim);font-family:monospace">{{ tx.reference or '—' }}</td>
+          <td data-label="Date" style="font-size:.8rem;color:var(--text-muted)">{{ tx.created_at[:10] }}</td>
+          <td data-label="Status">
+            <span class="badge badge-{{ 'success' if tx.status=='completed' else ('warning' if tx.status=='pending' else 'danger') }}">{{ tx.status }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon-wrap"><i data-feather="trending-down" style="width:26px;height:26px"></i></div>
+      <h4>No withdrawals yet</h4><p>Once you request a withdrawal, it will appear here with its full status history.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Withdraw Modal (reuses existing dashboard.wallet_withdraw endpoint — no new backend logic) -->
+<div id="withdraw-modal" class="modal-backdrop hidden">
+  <div class="modal">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-display text-xl font-bold">Request Withdrawal</h3>
+      <button onclick="document.getElementById('withdraw-modal').classList.add('hidden')" class="btn btn-ghost btn-sm p-2">
+        <i data-feather="x" style="width:16px;height:16px"></i>
+      </button>
+    </div>
+    <form method="POST" action="{{ url_for('dashboard.wallet_withdraw') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label class="form-label">Amount (min. ${{ min_withdrawal }}, max. ${{ max_withdrawal }})</label>
+        <div style="position:relative">
+          <span style="position:absolute;left:.85rem;top:50%;transform:translateY(-50%);color:var(--text-muted);font-weight:600">$</span>
+          <input type="number" name="amount" class="input" style="padding-left:1.8rem"
+                 placeholder="100.00" min="{{ min_withdrawal }}" max="{{ max_withdrawal }}" step="0.01" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Withdrawal Method</label>
+        <select name="method" class="input">
+          <option value="bank_transfer">Bank Transfer</option>
+          <option value="paypal">PayPal</option>
+          <option value="crypto">Cryptocurrency</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payout Details</label>
+        <textarea name="details" class="input" placeholder="Bank account number, PayPal email, or crypto address" rows="3"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary w-full justify-center">Request Withdrawal</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

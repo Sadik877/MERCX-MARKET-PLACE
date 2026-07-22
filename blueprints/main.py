@@ -30,17 +30,6 @@ def index():
     # All categories
     categories = db_select("categories", filters={"is_active": True}, order="sort_order")
 
-    # Top sellers (by total sales) — only sellers who've actually set up
-    # their store slug; store_slug is nullable, and a verified seller
-    # without one can't be linked to (url_for needs a real value).
-    top_sellers = db_select(
-        "user_profiles",
-        "user_id,store_name,store_slug,avatar_url,seller_verified,seller_rating,total_sales",
-        filters={"seller_verified": True},
-        order="-total_sales", limit=12
-    )
-    top_sellers = [s for s in top_sellers if s.get("store_slug")][:6]
-
     # Stats
     stats = {
         "listings": db_select("listings", "id", filters={"status": "active", "is_approved": True}),
@@ -50,7 +39,7 @@ def index():
 
     return render_template("index.html",
         featured=featured, popular=popular, newest=newest,
-        categories=categories, top_sellers=top_sellers,
+        categories=categories,
         total_listings=len(stats["listings"]),
         total_sellers=len(stats["sellers"]),
         total_users=len(stats["users"]),
@@ -64,7 +53,6 @@ def search():
     sort       = request.args.get("sort", "relevance")
     min_price  = request.args.get("min_price", "")
     max_price  = request.args.get("max_price", "")
-    min_rating = request.args.get("min_rating", "")
     page       = int(request.args.get("page", 1))
     per_page   = 20
 
@@ -94,12 +82,6 @@ def search():
                         continue
                 except (ValueError, TypeError):
                     pass
-            if min_rating:
-                try:
-                    if float(listing.get("rating") or 0) < float(min_rating):
-                        continue
-                except (ValueError, TypeError):
-                    pass
             results.append(listing)
 
         # Sort
@@ -123,7 +105,6 @@ def search():
     return render_template("marketplace/search.html",
         results=paginated, q=q, category=category,
         sort=sort, min_price=min_price, max_price=max_price,
-        min_rating=min_rating,
         total=total, page=page, pages=pages,
         categories=categories,
     )

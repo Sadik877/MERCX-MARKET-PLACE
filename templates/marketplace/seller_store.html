@@ -1,19 +1,17 @@
 {% extends 'base.html' %}
 {% block title %}{{ profile.store_name or seller.username }} — MercX Digital{% endblock %}
 {% block content %}
-<!-- Cover -->
-<div style="height:200px;position:relative;overflow:hidden;background:linear-gradient(135deg,#1A0B38,#0D1F3C)" class="sm:h-[240px]">
+<!-- Banner -->
+<div style="height:220px;position:relative;overflow:hidden;background:linear-gradient(135deg,#1A0B38,#0D1F3C)">
   {% if profile.store_banner_url %}
   <img src="{{ profile.store_banner_url }}" style="width:100%;height:100%;object-fit:cover;opacity:.7" alt="">
-  {% else %}
-  <div class="hero-grid" style="opacity:.5"></div>
   {% endif %}
-  <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(8,11,20,.95),transparent)"></div>
+  <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(8,11,20,.9),transparent)"></div>
 </div>
 
 <div style="max-width:1200px;margin:0 auto;padding:0 1.25rem">
   <!-- Seller info card -->
-  <div class="card glass -mt-14 mb-8 relative z-10" style="display:flex;align-items:flex-start;gap:1.5rem;flex-wrap:wrap">
+  <div class="card -mt-12 mb-8 relative z-10" style="display:flex;align-items:flex-start;gap:1.5rem;flex-wrap:wrap">
     {% if profile.avatar_url %}
     <img src="{{ profile.avatar_url }}" class="w-20 h-20 rounded-2xl object-cover border-4 flex-shrink-0"
          style="border-color:var(--bg-card)" alt="">
@@ -27,48 +25,30 @@
       <div class="flex items-center gap-3 flex-wrap mb-1">
         <h1 class="font-display text-2xl font-bold">{{ profile.store_name or seller.username }}</h1>
         {% if profile.seller_verified %}
-        <span class="badge badge-accent"><i data-feather="check-circle" style="width:11px;height:11px"></i> Verified Seller</span>
+        <span class="badge badge-accent"><i data-feather="check-circle" style="width:11px;height:11px"></i> Verified</span>
         {% endif %}
       </div>
       <p style="color:var(--text-muted);font-size:.9rem;line-height:1.6;max-width:600px">{{ profile.store_description or '' }}</p>
-
-      <div class="flex flex-wrap gap-3 mt-4">
-        <div class="seller-stat-pill">
-          <span class="val" style="color:var(--gold)">★ {{ '%.1f'|format(profile.seller_rating|float) }}</span>
-          <span class="lbl">Rating</span>
+      <div class="flex items-center gap-5 mt-3 flex-wrap">
+        <div style="font-size:.85rem;color:var(--text-muted)">
+          <span style="color:var(--gold)">★</span> <strong style="color:var(--text)">{{ '%.1f'|format(profile.seller_rating|float) }}</strong>
         </div>
-        <div class="seller-stat-pill">
-          <span class="val">{{ profile.total_sales or 0 }}</span>
-          <span class="lbl">Sales</span>
-        </div>
-        <div class="seller-stat-pill">
-          <span class="val">{{ listings|length }}</span>
-          <span class="lbl">Products</span>
-        </div>
-        <div class="seller-stat-pill">
-          <span class="val">{{ seller.created_at[:7] }}</span>
-          <span class="lbl">Member Since</span>
-        </div>
+        <div style="font-size:.85rem;color:var(--text-muted)"><strong style="color:var(--text)">{{ profile.total_sales or 0 }}</strong> sales</div>
+        <div style="font-size:.85rem;color:var(--text-muted)"><strong style="color:var(--text)">{{ listings|length }}</strong> products</div>
+        <div style="font-size:.85rem;color:var(--text-muted)">Member since {{ seller.created_at[:7] }}</div>
       </div>
     </div>
     {% if current_user_id and current_user_id != seller.id %}
-    <a href="{{ url_for('dashboard.messages') }}" class="btn btn-primary btn-sm flex-shrink-0">
-      <i data-feather="message-circle" style="width:14px;height:14px"></i> Message Seller
+    <a href="{{ url_for('dashboard.messages') }}" class="btn btn-outline btn-sm flex-shrink-0">
+      <i data-feather="message-circle" style="width:14px;height:14px"></i> Message
     </a>
     {% endif %}
   </div>
 
-  <!-- Tabs -->
-  <div data-tab-group="seller-tabs" class="mb-6">
-    <div class="tabs">
-      <button data-tab="products" class="tab active">Products ({{ listings|length }})</button>
-      <button data-tab="reviews" class="tab">Reviews ({{ reviews|length }})</button>
-    </div>
-  </div>
-
   <!-- Products -->
-  <div data-panel="products" class="mb-10">
-    {% if listings %}
+  {% if listings %}
+  <div class="mb-10">
+    <h2 class="font-display text-xl font-bold mb-5">Products by {{ profile.store_name or seller.username }}</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
       {% for listing in listings %}
       <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" class="product-card reveal" style="text-decoration:none">
@@ -79,23 +59,19 @@
         {% endif %}
         <div class="product-card__body">
           <div class="product-card__title">{{ listing.title }}</div>
-          <div class="product-card__rating"><span style="color:#F59E0B">★</span> {{ '%.1f'|format(listing.rating|float) }} <span style="color:var(--text-dim)">({{ listing.review_count or 0 }})</span></div>
+          <div class="product-card__rating"><span style="color:#F59E0B">★</span> {{ '%.1f'|format(listing.rating|float) }}</div>
           <span class="product-card__price">${{ '%.2f'|format(listing.price|float) }}</span>
         </div>
       </a>
       {% endfor %}
     </div>
-    {% else %}
-    <div class="card" style="text-align:center;padding:3rem">
-      <i data-feather="package" style="width:40px;height:40px;color:var(--text-dim);margin-bottom:.75rem"></i>
-      <p style="color:var(--text-muted)">This seller hasn't published any products yet.</p>
-    </div>
-    {% endif %}
   </div>
+  {% endif %}
 
   <!-- Reviews -->
-  <div data-panel="reviews" class="mb-10" style="display:none">
-    {% if reviews %}
+  {% if reviews %}
+  <div class="mb-10">
+    <h2 class="font-display text-xl font-bold mb-5">Customer Reviews</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       {% for r in reviews %}
       <div class="card">
@@ -107,12 +83,7 @@
       </div>
       {% endfor %}
     </div>
-    {% else %}
-    <div class="card" style="text-align:center;padding:3rem">
-      <i data-feather="star" style="width:40px;height:40px;color:var(--text-dim);margin-bottom:.75rem"></i>
-      <p style="color:var(--text-muted)">No reviews yet for this seller.</p>
-    </div>
-    {% endif %}
   </div>
+  {% endif %}
 </div>
 {% endblock %}

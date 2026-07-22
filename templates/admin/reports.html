@@ -9,40 +9,41 @@
 </div>
 <div class="card" style="padding:0;overflow:hidden">
   {% if reports %}
-  <div class="table-wrap" style="border:none">
-  <table class="table">
-    <thead><tr><th>Listing</th><th>Reporter</th><th>Reason</th><th>Details</th><th>Date</th><th>Action</th></tr></thead>
-    <tbody>
-    {% for r in reports %}
-    <tr>
-      <td>{% if r.listing %}<a href="{{ url_for('marketplace.listing_detail', slug=r.listing.slug) }}" target="_blank" style="color:var(--primary-light)">{{ r.listing.title }}</a>{% else %}—{% endif %}</td>
-      <td style="font-size:.85rem">{{ r.reporter.username if r.reporter else '—' }}</td>
-      <td><span class="badge badge-warning">{{ r.reason }}</span></td>
-      <td style="font-size:.82rem;color:var(--text-muted);max-width:200px" class="truncate-2">{{ r.description or '—' }}</td>
-      <td style="font-size:.8rem;color:var(--text-muted)">{{ r.created_at[:10] }}</td>
-      <td>
-        {% if r.status == 'pending' %}
-        <div class="flex gap-1">
-          <form method="POST" action="{{ url_for('admin.action_report', report_id=r.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="actioned">
-            <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5">Action</button>
-          </form>
-          <form method="POST" action="{{ url_for('admin.action_report', report_id=r.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="dismissed">
-            <button class="btn btn-ghost btn-sm">Dismiss</button>
-          </form>
-        </div>
-        {% else %}<span class="badge badge-neutral">{{ r.status }}</span>{% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrap responsive-cards" style="border:none">
+    <table class="table">
+      <thead><tr><th>Listing</th><th>Reporter</th><th>Reason</th><th>Details</th><th>Date</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for r in reports %}
+      <tr>
+        <td data-label="Listing">{% if r.listing %}<a href="{{ url_for('marketplace.listing_detail', slug=r.listing.slug) }}" target="_blank" style="color:var(--primary-light)">{{ r.listing.title }}</a>{% else %}—{% endif %}</td>
+        <td data-label="Reporter" style="font-size:.85rem">{{ r.reporter.username if r.reporter else '—' }}</td>
+        <td data-label="Reason"><span class="badge badge-warning">{{ r.reason }}</span></td>
+        <td data-label="Details" style="font-size:.82rem;color:var(--text-muted);max-width:200px" class="truncate-2">{{ r.description or '—' }}</td>
+        <td data-label="Date" style="font-size:.8rem;color:var(--text-muted)">{{ r.created_at[:10] }}</td>
+        <td data-label="Action">
+          {% if r.status == 'pending' %}
+          <div class="flex gap-1">
+            <form method="POST" action="{{ url_for('admin.action_report', report_id=r.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="actioned">
+              <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5">Action</button>
+            </form>
+            <form method="POST" action="{{ url_for('admin.action_report', report_id=r.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="dismissed">
+              <button class="btn btn-ghost btn-sm">Dismiss</button>
+            </form>
+          </div>
+          {% else %}<span class="badge badge-neutral">{{ r.status }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% else %}
-  <div style="text-align:center;padding:3rem">
-    <i data-feather="flag" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
-    <p style="color:var(--text-muted)">No reports in this category.</p>
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="flag" style="width:28px;height:28px"></i></div>
+    <h4>No reports {{ 'in this status' if status else 'yet' }}</h4>
+    <p>{{ 'Try a different filter.' if status else 'Listing reports from buyers will appear here.' }}</p>
   </div>
   {% endif %}
 </div>

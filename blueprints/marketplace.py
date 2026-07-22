@@ -16,10 +16,12 @@ marketplace_bp = Blueprint("marketplace", __name__)
 
 @marketplace_bp.route("/")
 def index():
-    sort     = request.args.get("sort", "popular")
-    cat_slug = request.args.get("category", "")
-    page     = int(request.args.get("page", 1))
-    per_page = 24
+    sort      = request.args.get("sort", "popular")
+    cat_slug  = request.args.get("category", "")
+    min_price = request.args.get("min_price", "")
+    max_price = request.args.get("max_price", "")
+    page      = int(request.args.get("page", 1))
+    per_page  = 24
 
     filters = {"status": "active", "is_approved": True}
 
@@ -46,22 +48,36 @@ def index():
         order=order,
     )
 
+    # Price range filter (client-supplied, applied in Python like main.search())
+    if min_price:
+        try:
+            all_listings = [l for l in all_listings if float(l["price"]) >= float(min_price)]
+        except (ValueError, TypeError):
+            pass
+    if max_price:
+        try:
+            all_listings = [l for l in all_listings if float(l["price"]) <= float(max_price)]
+        except (ValueError, TypeError):
+            pass
+
     categories  = db_select("categories", "*", filters={"is_active": True}, order="sort_order")
     total       = len(all_listings)
     start       = (page - 1) * per_page
     paginated   = all_listings[start: start + per_page]
     pages       = max(1, -(-total // per_page))
 
-    # Current user's wishlist (for heart icon state on product cards)
+    # Real wishlist state for the current user (fixes a dead "in []" check
+    # that previously always rendered the heart icon as empty)
     wishlist_ids = set()
     uid = session.get("user_id")
     if uid:
-        wl_rows = db_select("wishlist", "listing_id", filters={"user_id": uid})
-        wishlist_ids = {row["listing_id"] for row in wl_rows}
+        wl = db_select("wishlist", "listing_id", filters={"user_id": uid})
+        wishlist_ids = {w["listing_id"] for w in wl}
 
     return render_template("marketplace/index.html",
         listings=paginated, categories=categories,
         current_category=category, sort=sort,
+        min_price=min_price, max_price=max_price,
         total=total, page=page, pages=pages,
         wishlist_ids=wishlist_ids,
     )

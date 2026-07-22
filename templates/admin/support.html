@@ -9,27 +9,28 @@
 </div>
 <div class="card" style="padding:0;overflow:hidden">
   {% if tickets %}
-  <div class="table-wrap" style="border:none">
-  <table class="table">
-    <thead><tr><th>Ticket</th><th>Subject</th><th>User</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead>
-    <tbody>
-    {% for t in tickets %}
-    <tr style="cursor:pointer" onclick="location.href='{{ url_for('admin.ticket_detail', ticket_id=t.id) }}'">
-      <td class="font-mono text-xs" style="color:var(--primary-light)">{{ t.ticket_number }}</td>
-      <td class="text-sm">{{ t.subject }}</td>
-      <td style="font-size:.85rem">{{ t.user.username if t.user else '—' }}</td>
-      <td><span class="badge badge-{{ 'danger' if t.priority=='urgent' else ('warning' if t.priority=='high' else 'neutral') }}">{{ t.priority }}</span></td>
-      <td><span class="badge badge-{{ 'success' if t.status=='resolved' else 'warning' }}">{{ t.status }}</span></td>
-      <td style="font-size:.8rem;color:var(--text-muted)">{{ t.created_at[:10] }}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrap responsive-cards" style="border:none">
+    <table class="table">
+      <thead><tr><th>Ticket</th><th>Subject</th><th>User</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody>
+      {% for t in tickets %}
+      <tr>
+        <td data-label="Ticket" class="font-mono text-xs" style="color:var(--primary-light)">{{ t.ticket_number }}</td>
+        <td data-label="Subject" class="text-sm">{{ t.subject }}</td>
+        <td data-label="User" style="font-size:.85rem">{{ t.user.username if t.user else '—' }}</td>
+        <td data-label="Priority"><span class="badge badge-{{ 'danger' if t.priority=='urgent' else ('warning' if t.priority=='high' else 'neutral') }}">{{ t.priority }}</span></td>
+        <td data-label="Status"><span class="badge badge-{{ 'success' if t.status=='resolved' else 'warning' }}">{{ t.status }}</span></td>
+        <td data-label="Date" style="font-size:.8rem;color:var(--text-muted)">{{ t.created_at[:10] }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% else %}
-  <div style="text-align:center;padding:3rem">
-    <i data-feather="headphones" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
-    <p style="color:var(--text-muted)">No tickets in this category.</p>
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="headphones" style="width:28px;height:28px"></i></div>
+    <h4>No tickets {{ 'in this status' if status else 'yet' }}</h4>
+    <p>{{ 'Try a different filter.' if status else 'Buyer and seller support requests will appear here.' }}</p>
   </div>
   {% endif %}
 </div>

@@ -5,32 +5,33 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
   <div class="lg:col-span-2">
     <div class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap" style="border:none">
-      <table class="table">
-        <thead><tr><th>Code</th><th>Discount</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-        {% for c in coupons %}
-        <tr>
-          <td class="font-mono font-semibold" style="color:var(--primary-light)">{{ c.code }}</td>
-          <td>{{ c.value }}{{ '%' if c.type == 'percentage' else '$' }} off</td>
-          <td style="color:var(--text-muted)">{{ c.used_count or 0 }}{{ '/'~c.max_uses if c.max_uses else '' }}</td>
-          <td style="color:var(--text-muted);font-size:.82rem">{{ c.expires_at[:10] if c.expires_at else 'Never' }}</td>
-          <td><span class="badge badge-{{ 'success' if c.is_active else 'neutral' }}">{{ 'Active' if c.is_active else 'Disabled' }}</span></td>
-          <td>
-            <form method="POST" action="{{ url_for('admin.toggle_coupon', coupon_id=c.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-ghost btn-sm">{{ 'Disable' if c.is_active else 'Enable' }}</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+      {% if coupons %}
+      <div class="table-wrap responsive-cards" style="border:none">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Discount</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for c in coupons %}
+          <tr>
+            <td data-label="Code" class="font-mono font-semibold" style="color:var(--primary-light)">{{ c.code }}</td>
+            <td data-label="Discount">{{ c.value }}{{ '%' if c.type == 'percentage' else '$' }} off</td>
+            <td data-label="Uses" style="color:var(--text-muted)">{{ c.used_count or 0 }}{{ '/'~c.max_uses if c.max_uses else '' }}</td>
+            <td data-label="Expires" style="color:var(--text-muted);font-size:.82rem">{{ c.expires_at[:10] if c.expires_at else 'Never' }}</td>
+            <td data-label="Status"><span class="badge badge-{{ 'success' if c.is_active else 'neutral' }}">{{ 'Active' if c.is_active else 'Disabled' }}</span></td>
+            <td data-label="">
+              <form method="POST" action="{{ url_for('admin.toggle_coupon', coupon_id=c.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-ghost btn-sm">{{ 'Disable' if c.is_active else 'Enable' }}</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% if not coupons %}
-      <div style="text-align:center;padding:3rem">
-        <i data-feather="tag" style="width:36px;height:36px;color:var(--text-dim);margin-bottom:.75rem"></i>
-        <p style="color:var(--text-muted)">No coupons yet. Create your first one.</p>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon-wrap"><i data-feather="tag" style="width:28px;height:28px"></i></div>
+        <h4>No coupons yet</h4><p>Create your first coupon using the form.</p>
       </div>
       {% endif %}
     </div>

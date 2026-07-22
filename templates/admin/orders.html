@@ -17,24 +17,24 @@
   </form>
 </div>
 
-<div class="card hidden lg:block" style="padding:0;overflow:hidden">
+<div class="card" style="padding:0;overflow:hidden">
   {% if orders %}
-  <div class="table-wrap" style="border:none">
+  <div class="table-wrap responsive-cards" style="border:none">
     <table class="table">
       <thead><tr><th>Order #</th><th>Buyer</th><th>Seller</th><th>Total</th><th>Fee</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
       {% for o in orders %}
       {% set sc = {'completed':'success','pending':'warning','processing':'accent','cancelled':'danger','refunded':'neutral','disputed':'danger'} %}
       <tr>
-        <td><span class="font-mono text-xs" style="color:var(--primary-light)">{{ o.order_number }}</span></td>
-        <td style="font-size:.85rem">{{ o.buyer.username if o.buyer else '—' }}</td>
-        <td style="font-size:.85rem">{{ o.seller.username if o.seller else '—' }}</td>
-        <td class="font-semibold">${{ '%.2f'|format(o.total|float) }}</td>
-        <td style="color:var(--text-muted);font-size:.82rem">${{ '%.2f'|format(o.platform_fee|float if o.platform_fee else 0) }}</td>
-        <td style="color:var(--text-muted);font-size:.82rem">{{ o.created_at[:10] }}</td>
-        <td><span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span></td>
-        <td>
-          {% if o.status == 'completed' and current_role == 'admin' %}
+        <td data-label="Order #"><span class="font-mono text-xs" style="color:var(--primary-light)">{{ o.order_number }}</span></td>
+        <td data-label="Buyer" style="font-size:.85rem">{{ o.buyer.username if o.buyer else '—' }}</td>
+        <td data-label="Seller" style="font-size:.85rem">{{ o.seller.username if o.seller else '—' }}</td>
+        <td data-label="Total" class="font-semibold">${{ '%.2f'|format(o.total|float) }}</td>
+        <td data-label="Fee" style="color:var(--text-muted);font-size:.82rem">${{ '%.2f'|format(o.platform_fee|float if o.platform_fee else 0) }}</td>
+        <td data-label="Date" style="color:var(--text-muted);font-size:.82rem">{{ o.created_at[:10] }}</td>
+        <td data-label="Status"><span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span></td>
+        <td data-label="Action">
+          {% if o.status == 'completed' %}
           <button onclick="document.getElementById('refund-{{ o.id }}').classList.toggle('hidden')" class="btn btn-ghost btn-sm">
             <i data-feather="corner-up-left" style="width:13px;height:13px"></i> Refund
           </button>
@@ -46,8 +46,6 @@
               <button type="submit" class="btn btn-danger btn-sm">Refund</button>
             </form>
           </div>
-          {% elif o.status == 'completed' %}
-          <span style="font-size:.75rem;color:var(--text-dim)">Admin only</span>
           {% endif %}
         </td>
       </tr>
@@ -65,49 +63,11 @@
   </div>
   {% endif %}
   {% else %}
-  <div style="text-align:center;padding:3rem"><p style="color:var(--text-muted)">No orders found.</p></div>
-  {% endif %}
-</div>
-
-<!-- Mobile cards -->
-{% if orders %}
-<div class="lg:hidden space-y-3">
-  {% set sc = {'completed':'success','pending':'warning','processing':'accent','cancelled':'danger','refunded':'neutral','disputed':'danger'} %}
-  {% for o in orders %}
-  <div class="card">
-    <div class="flex items-center justify-between mb-2">
-      <span class="font-mono text-sm" style="color:var(--primary-light)">{{ o.order_number }}</span>
-      <span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span>
-    </div>
-    <div style="font-size:.8rem;color:var(--text-muted)">Buyer: {{ o.buyer.username if o.buyer else '—' }} · Seller: {{ o.seller.username if o.seller else '—' }}</div>
-    <div class="flex items-center justify-between mt-2 pt-2" style="border-top:1px solid var(--border)">
-      <span class="font-semibold">${{ '%.2f'|format(o.total|float) }}</span>
-      <span style="font-size:.78rem;color:var(--text-dim)">{{ o.created_at[:10] }}</span>
-    </div>
-    {% if o.status == 'completed' and current_role == 'admin' %}
-    <button onclick="document.getElementById('refund-m-{{ o.id }}').classList.toggle('hidden')" class="btn btn-ghost btn-sm w-full justify-center mt-3">
-      <i data-feather="corner-up-left" style="width:13px;height:13px"></i> Refund
-    </button>
-    <div id="refund-m-{{ o.id }}" class="hidden mt-2">
-      <form method="POST" action="{{ url_for('admin.refund_order', order_id=o.id) }}" class="flex flex-col gap-2">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="number" name="amount" class="input" placeholder="Amount" max="{{ o.total }}" step="0.01" required>
-        <input type="text" name="reason" class="input" placeholder="Reason" required>
-        <button type="submit" class="btn btn-danger btn-sm w-full justify-center">Refund</button>
-      </form>
-    </div>
-    {% endif %}
-  </div>
-  {% endfor %}
-  {% if pages > 1 %}
-  <div class="flex justify-center pt-2">
-    <div class="pagination">
-      {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('admin.orders', status=status, q=search, page=p) }}" class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
-      {% endfor %}
-    </div>
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="shopping-cart" style="width:28px;height:28px"></i></div>
+    <h4>No orders {{ 'matching your search' if search else ('in this status' if status else 'yet') }}</h4>
+    <p>{{ 'Try a different search term.' if search else ('Try a different filter.' if status else 'Platform orders will appear here.') }}</p>
   </div>
   {% endif %}
 </div>
-{% endif %}
 {% endblock %}

@@ -1,54 +1,52 @@
 {% extends 'seller/base.html' %}
-{% block title %}Seller Orders — MercX Digital{% endblock %}
+{% block title %}Orders — MercX Digital{% endblock %}
 {% block page_content %}
 <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
   <div>
-    <h1 class="font-display text-2xl font-bold">Incoming Orders</h1>
-    <p style="font-size:.82rem;color:var(--text-muted)">{{ total }} order{{ 's' if total != 1 }}</p>
+    <h1 class="font-display text-2xl font-bold">Orders</h1>
+    <p style="color:var(--text-muted);font-size:.85rem">{{ total }} order{{ 's' if total != 1 }}</p>
   </div>
-  <button type="button" id="export-csv" class="btn btn-outline btn-sm">
-    <i data-feather="download" style="width:14px;height:14px"></i> Export CSV
-  </button>
+  <a href="{{ url_for('seller.export_orders', status=status) }}" class="btn btn-outline btn-sm">
+    <i data-feather="download" style="width:15px;height:15px"></i> Export CSV
+  </a>
 </div>
 
-<div class="flex flex-wrap items-center gap-3 mb-5">
+<div class="flex flex-wrap gap-3 mb-5">
   <div class="tabs" style="border:none;margin:0">
     {% for s, label in [('','All'),('pending','Pending'),('processing','Processing'),('completed','Completed'),('cancelled','Cancelled')] %}
-    <a href="{{ url_for('seller.orders', status=s, q=search) }}" class="tab {% if status == s %}active{% endif %}">{{ label }}</a>
+    <a href="{{ url_for('seller.orders', status=s) }}" class="tab {% if status == s %}active{% endif %}">{{ label }}</a>
     {% endfor %}
   </div>
   <form class="flex gap-2 ml-auto" action="{{ url_for('seller.orders') }}" method="GET">
     <input type="hidden" name="status" value="{{ status }}">
-    <input type="text" name="q" class="input" style="width:200px" placeholder="Search order # or buyer…" value="{{ search }}">
-    <button type="submit" class="btn btn-ghost btn-sm p-2"><i data-feather="search" style="width:15px;height:15px"></i></button>
+    <input type="text" name="q" class="input" style="width:200px" placeholder="Search order #…">
+    <button type="submit" class="btn btn-ghost btn-sm"><i data-feather="search" style="width:15px;height:15px"></i></button>
   </form>
 </div>
 
-{% set sc = {'completed':'success','pending':'warning','processing':'accent','cancelled':'danger','refunded':'neutral'} %}
-
-{% if orders %}
-<!-- Desktop table -->
-<div class="card hidden lg:block" style="padding:0;overflow:hidden">
-  <div class="table-wrap" style="border:none">
-    <table class="table" id="orders-table">
+<div class="card" style="padding:0;overflow:hidden">
+  {% if orders %}
+  <div class="table-wrap responsive-cards" style="border:none">
+    <table class="table">
       <thead><tr><th>Order #</th><th>Buyer</th><th>Products</th><th>Total</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
       {% for o in orders %}
+      {% set sc = {'completed':'success','pending':'warning','processing':'accent','cancelled':'danger','refunded':'neutral'} %}
       <tr>
-        <td><span class="font-mono text-sm" style="color:var(--primary-light)">{{ o.order_number }}</span></td>
-        <td style="font-size:.85rem">{{ o.buyer.username if o.buyer else '—' }}</td>
-        <td>
-          {% for item in o.order_items %}
-          <div style="font-size:.82rem;color:var(--text-muted)" class="truncate" style="max-width:160px">{{ item.title }}</div>
+        <td data-label="Order #"><span class="font-mono text-sm" style="color:var(--primary-light)">{{ o.order_number }}</span></td>
+        <td data-label="Buyer" style="font-size:.85rem">{{ o.buyer.username if o.buyer else '—' }}</td>
+        <td data-label="Products">
+          {% for item in o['items'] %}
+          <div class="truncate" style="font-size:.82rem;color:var(--text-muted);max-width:160px">{{ item.title }}</div>
           {% endfor %}
         </td>
-        <td class="font-semibold" style="color:var(--success)">${{ '%.2f'|format(o.total|float) }}</td>
-        <td style="color:var(--text-muted);font-size:.82rem">{{ o.created_at[:10] }}</td>
-        <td><span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status|title }}</span></td>
-        <td>
-          {% for item in o.order_items %}
+        <td data-label="Total" class="font-semibold" style="color:var(--success)">${{ '%.2f'|format(o.total|float) }}</td>
+        <td data-label="Date" style="color:var(--text-muted);font-size:.82rem">{{ o.created_at[:10] }}</td>
+        <td data-label="Status"><span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span></td>
+        <td data-label="Action">
+          {% for item in o['items'] %}
           {% if item.delivery_status == 'pending' %}
-          <button onclick="document.getElementById('deliver-{{ item.id }}').classList.remove('hidden')"
+          <button onclick="document.getElementById('deliver-{{ item.id }}').classList.toggle('hidden')"
                   class="btn btn-primary btn-sm">
             <i data-feather="send" style="width:13px;height:13px"></i> Deliver
           </button>
@@ -56,7 +54,7 @@
           {% endfor %}
         </td>
       </tr>
-      {% for item in o.order_items %}
+      {% for item in o['items'] %}
       {% if item.delivery_status == 'pending' %}
       <tr id="deliver-{{ item.id }}" class="hidden" style="background:rgba(124,58,237,.05)">
         <td colspan="7" style="padding:1rem">
@@ -67,11 +65,8 @@
             <textarea name="delivery_content" class="input" rows="4" required
                       placeholder="Paste the download link, license key, or any content the buyer should receive…"></textarea>
             <div class="flex gap-3">
-              <button type="submit" class="btn btn-primary btn-sm">
-                <i data-feather="check" style="width:14px;height:14px"></i> Send Delivery
-              </button>
-              <button type="button" onclick="document.getElementById('deliver-{{ item.id }}').classList.add('hidden')"
-                      class="btn btn-ghost btn-sm">Cancel</button>
+              <button type="submit" class="btn btn-primary btn-sm"><i data-feather="check" style="width:14px;height:14px"></i> Send Delivery</button>
+              <button type="button" onclick="document.getElementById('deliver-{{ item.id }}').classList.add('hidden')" class="btn btn-ghost btn-sm">Cancel</button>
             </div>
           </form>
         </td>
@@ -86,80 +81,17 @@
   <div class="flex justify-center p-4">
     <div class="pagination">
       {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('seller.orders', status=status, q=search, page=p) }}"
-         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+      <a href="{{ url_for('seller.orders', status=status, page=p) }}" class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
       {% endfor %}
     </div>
   </div>
   {% endif %}
-</div>
-
-<!-- Mobile cards -->
-<div class="lg:hidden space-y-3">
-  {% for o in orders %}
-  <div class="card">
-    <div class="flex items-center justify-between mb-2">
-      <span class="font-mono text-sm" style="color:var(--primary-light)">{{ o.order_number }}</span>
-      <span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status|title }}</span>
-    </div>
-    <div style="font-size:.85rem;margin-bottom:.35rem"><strong>{{ o.buyer.username if o.buyer else '—' }}</strong></div>
-    {% for item in o.order_items %}
-    <div style="font-size:.8rem;color:var(--text-muted)">{{ item.title }}</div>
-    {% endfor %}
-    <div class="flex items-center justify-between mt-3 pt-3" style="border-top:1px solid var(--border)">
-      <span class="font-semibold" style="color:var(--success)">${{ '%.2f'|format(o.total|float) }}</span>
-      <span style="font-size:.78rem;color:var(--text-dim)">{{ o.created_at[:10] }}</span>
-    </div>
-    {% for item in o.order_items %}
-    {% if item.delivery_status == 'pending' %}
-    <button onclick="document.getElementById('deliver-m-{{ item.id }}').classList.toggle('hidden')"
-            class="btn btn-primary btn-sm w-full justify-center mt-3">
-      <i data-feather="send" style="width:13px;height:13px"></i> Deliver "{{ item.title }}"
-    </button>
-    <form id="deliver-m-{{ item.id }}" method="POST" action="{{ url_for('seller.deliver_order', order_id=o.id) }}" class="hidden flex-col gap-3 mt-3">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="item_id" value="{{ item.id }}">
-      <textarea name="delivery_content" class="input" rows="4" required
-                placeholder="Paste the download link, license key, or any content the buyer should receive…"></textarea>
-      <button type="submit" class="btn btn-primary btn-sm w-full justify-center">Send Delivery</button>
-    </form>
-    {% endif %}
-    {% endfor %}
-  </div>
-  {% endfor %}
-  {% if pages > 1 %}
-  <div class="flex justify-center pt-2">
-    <div class="pagination">
-      {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('seller.orders', status=status, q=search, page=p) }}"
-         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
-      {% endfor %}
-    </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="shopping-cart" style="width:28px;height:28px"></i></div>
+    <h4>No orders {{ 'in this status' if status else 'yet' }}</h4>
+    <p>{{ 'Try a different filter.' if status else 'Keep promoting your products — incoming orders will show up here.' }}</p>
   </div>
   {% endif %}
 </div>
-
-{% else %}
-<div class="card" style="text-align:center;padding:4rem">
-  <i data-feather="shopping-cart" style="width:44px;height:44px;color:var(--text-dim);margin-bottom:1rem"></i>
-  <h3 class="font-display text-lg font-bold mb-2">No orders {{ 'match your search' if status or search else 'yet' }}</h3>
-  <p style="color:var(--text-muted)">{{ 'Try a different filter.' if status or search else 'Keep promoting your products to land your first sale!' }}</p>
-</div>
-{% endif %}
-
-<script>
-document.getElementById('export-csv')?.addEventListener('click', () => {
-  const table = document.getElementById('orders-table');
-  if (!table) return;
-  const rows = Array.from(table.querySelectorAll('tr')).filter(r => !r.closest('tr[id^="deliver-"]'));
-  const csv = rows.map(row =>
-    Array.from(row.children).slice(0, 6).map(cell => '"' + cell.textContent.trim().replace(/"/g, '""').replace(/\s+/g,' ') + '"').join(',')
-  ).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'mercx-orders.csv';
-  a.click();
-});
-</script>
 {% endblock %}

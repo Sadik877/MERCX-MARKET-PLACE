@@ -18,123 +18,158 @@
   </form>
 </div>
 
-<div class="card hidden lg:block" style="padding:0;overflow:hidden">
-  {% if listings %}
-  <div class="table-wrap" style="border:none">
-    <table class="table">
-      <thead><tr><th>Product</th><th>Seller</th><th>Price</th><th>Sales</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>
-      {% for l in listings %}
-      {% set sc = {'active':'success','pending':'warning','rejected':'danger','paused':'neutral','deleted':'danger'} %}
-      <tr>
-        <td>
-          <div style="max-width:200px">
-            <div class="font-semibold text-sm truncate" style="color:var(--text)">{{ l.title }}</div>
-            <div style="font-size:.73rem;color:var(--text-dim)">{{ l.created_at[:10] }}</div>
-            {% if l.is_featured %}<span class="badge badge-warning" style="font-size:.65rem">Featured</span>{% endif %}
-          </div>
-        </td>
-        <td style="color:var(--text-muted);font-size:.85rem">{{ l.seller.username if l.seller else '—' }}</td>
-        <td class="font-semibold">${{ '%.2f'|format(l.price|float) }}</td>
-        <td style="color:var(--text-muted)">{{ l.sales_count or 0 }}</td>
-        <td><span class="badge badge-{{ sc.get(l.status,'neutral') }}">{{ l.status }}</span></td>
-        <td>
-          <div class="flex gap-1 flex-wrap">
-            {% if l.status == 'pending' %}
-            <form method="POST" action="{{ url_for('admin.approve_listing', listing_id=l.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
-                <i data-feather="check" style="width:13px;height:13px"></i> Approve
-              </button>
-            </form>
-            <button onclick="document.getElementById('reject-{{ l.id }}').classList.toggle('hidden')"
-                    class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
-              <i data-feather="x" style="width:13px;height:13px"></i> Reject
-            </button>
-            {% endif %}
-            <form method="POST" action="{{ url_for('admin.feature_listing', listing_id=l.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-ghost btn-sm p-2" title="{{ 'Unfeature' if l.is_featured else 'Feature' }}">
-                <i data-feather="star" style="width:13px;height:13px;{{ 'fill:#F59E0B;stroke:#F59E0B' if l.is_featured else '' }}"></i>
-              </button>
-            </form>
-            {% if l.status == 'active' %}
-            <a href="{{ url_for('marketplace.listing_detail', slug=l.slug) }}" target="_blank" class="btn btn-ghost btn-sm p-2">
-              <i data-feather="external-link" style="width:13px;height:13px"></i>
-            </a>
-            {% endif %}
-          </div>
-          <!-- Reject form (hidden) -->
-          <div id="reject-{{ l.id }}" class="hidden mt-2">
-            <form method="POST" action="{{ url_for('admin.reject_listing', listing_id=l.id) }}" class="flex gap-2">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="text" name="reason" class="input" style="flex:1" placeholder="Rejection reason…" required>
-              <button type="submit" class="btn btn-danger btn-sm">Send</button>
-            </form>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% if pages > 1 %}
-  <div class="flex justify-center p-4">
-    <div class="pagination">
-      {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('admin.listings', status=status, q=search, page=p) }}"
-         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-  {% else %}
-  <div style="text-align:center;padding:3rem">
-    <i data-feather="package" style="width:40px;height:40px;color:var(--text-dim);margin-bottom:1rem"></i>
-    <p style="color:var(--text-muted)">No listings found.</p>
-  </div>
-  {% endif %}
-</div>
-
-<!-- Mobile cards -->
-{% if listings %}
-<div class="lg:hidden space-y-3">
-  {% set sc = {'active':'success','pending':'warning','rejected':'danger','paused':'neutral','deleted':'danger'} %}
-  {% for l in listings %}
-  <div class="card">
-    <div class="flex items-center justify-between mb-2">
-      <div class="font-semibold text-sm truncate" style="color:var(--text);max-width:180px">{{ l.title }}</div>
-      <span class="badge badge-{{ sc.get(l.status,'neutral') }}">{{ l.status }}</span>
-    </div>
-    <div style="font-size:.78rem;color:var(--text-dim)">{{ l.seller.username if l.seller else '—' }} · ${{ '%.2f'|format(l.price|float) }} · {{ l.sales_count or 0 }} sales</div>
-    <div class="flex gap-2 mt-3 flex-wrap">
-      {% if l.status == 'pending' %}
-      <form method="POST" action="{{ url_for('admin.approve_listing', listing_id=l.id) }}" style="flex:1">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-sm w-full justify-center" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">Approve</button>
-      </form>
-      <button onclick="document.getElementById('reject-m-{{ l.id }}').classList.toggle('hidden')" class="btn btn-sm" style="flex:1;background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">Reject</button>
+<!-- Bulk action bar -->
+<form id="admin-bulk-form" method="POST" action="{{ url_for('admin.bulk_listing_action') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" id="admin-bulk-action-input" value="">
+  <input type="hidden" name="current_status" value="{{ status }}">
+  <div id="admin-bulk-bar" class="bulk-bar hidden">
+    <label class="flex items-center gap-2 cursor-pointer" style="margin:0">
+      <input type="checkbox" id="admin-select-all" class="w-4 h-4" style="accent-color:var(--primary)">
+      <span style="font-size:.85rem;font-weight:600;color:var(--text)"><span id="admin-selected-count">0</span> selected</span>
+    </label>
+    <div class="flex gap-2 ml-auto flex-wrap">
+      {% if status == 'pending' or not status %}
+      <button type="button" onclick="setAdminBulkAction('approve')" class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
+        <i data-feather="check" style="width:13px;height:13px"></i> Approve
+      </button>
+      <button type="button" onclick="promptAdminReject()" class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
+        <i data-feather="x" style="width:13px;height:13px"></i> Reject
+      </button>
       {% endif %}
-    </div>
-    <div id="reject-m-{{ l.id }}" class="hidden mt-2">
-      <form method="POST" action="{{ url_for('admin.reject_listing', listing_id=l.id) }}" class="flex gap-2">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="text" name="reason" class="input" style="flex:1" placeholder="Rejection reason…" required>
-        <button type="submit" class="btn btn-danger btn-sm">Send</button>
-      </form>
-    </div>
-  </div>
-  {% endfor %}
-  {% if pages > 1 %}
-  <div class="flex justify-center pt-2">
-    <div class="pagination">
-      {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('admin.listings', status=status, q=search, page=p) }}"
-         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
-      {% endfor %}
+      <button type="button" onclick="setAdminBulkAction('feature')" class="btn btn-sm" style="background:rgba(245,158,11,.12);color:#FCD34D;border:1px solid rgba(245,158,11,.3)">
+        <i data-feather="star" style="width:13px;height:13px"></i> Feature
+      </button>
+      <button type="button" onclick="setAdminBulkAction('delete')" class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
+        <i data-feather="trash-2" style="width:13px;height:13px"></i> Delete
+      </button>
     </div>
   </div>
-  {% endif %}
-</div>
-{% endif %}
+
+  <div class="card" style="padding:0;overflow:hidden">
+    {% if listings %}
+    <div class="table-wrap responsive-cards" style="border:none">
+      <table class="table">
+        <thead><tr><th style="width:30px"><input type="checkbox" id="admin-select-all-th" class="w-4 h-4" style="accent-color:var(--primary)"></th><th>Product</th><th>Seller</th><th>Price</th><th>Sales</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+        {% for l in listings %}
+        {% set sc = {'active':'success','pending':'warning','rejected':'danger','paused':'neutral','deleted':'danger'} %}
+        <tr>
+          <td data-label=""><input type="checkbox" class="admin-bulk-checkbox w-4 h-4" value="{{ l.id }}" style="accent-color:var(--primary)"></td>
+          <td data-label="Product">
+            <div style="max-width:200px">
+              <div class="font-semibold text-sm truncate" style="color:var(--text)">{{ l.title }}</div>
+              <div style="font-size:.73rem;color:var(--text-dim)">{{ l.created_at[:10] }}</div>
+              {% if l.is_featured %}<span class="badge badge-warning" style="font-size:.65rem">Featured</span>{% endif %}
+            </div>
+          </td>
+          <td data-label="Seller" style="color:var(--text-muted);font-size:.85rem">{{ l.seller.username if l.seller else '—' }}</td>
+          <td data-label="Price" class="font-semibold">${{ '%.2f'|format(l.price|float) }}</td>
+          <td data-label="Sales" style="color:var(--text-muted)">{{ l.sales_count or 0 }}</td>
+          <td data-label="Status"><span class="badge badge-{{ sc.get(l.status,'neutral') }}">{{ l.status }}</span></td>
+          <td data-label="Actions">
+            <div class="flex gap-1 flex-wrap">
+              {% if l.status == 'pending' %}
+              <button type="button" onclick="quickApprove('{{ l.id }}')" class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
+                <i data-feather="check" style="width:13px;height:13px"></i>
+              </button>
+              <button onclick="document.getElementById('reject-{{ l.id }}').classList.toggle('hidden')"
+                      class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
+                <i data-feather="x" style="width:13px;height:13px"></i>
+              </button>
+              {% endif %}
+              {% if l.status == 'active' %}
+              <a href="{{ url_for('marketplace.listing_detail', slug=l.slug) }}" target="_blank" class="btn btn-ghost btn-sm p-2">
+                <i data-feather="external-link" style="width:13px;height:13px"></i>
+              </a>
+              {% endif %}
+            </div>
+            <div id="reject-{{ l.id }}" class="hidden mt-2">
+              <form method="POST" action="{{ url_for('admin.reject_listing', listing_id=l.id) }}" class="flex gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" name="reason" class="input" style="flex:1" placeholder="Rejection reason…" required>
+                <button type="submit" class="btn btn-danger btn-sm">Send</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pages > 1 %}
+    <div class="flex justify-center p-4">
+      <div class="pagination">
+        {% for p in range(1, pages+1) %}
+        <a href="{{ url_for('admin.listings', status=status, q=search, page=p) }}"
+           class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">
+      <div class="icon-wrap"><i data-feather="package" style="width:28px;height:28px"></i></div>
+      <h4>No listings {{ 'matching your search' if search else 'here' }}</h4>
+      <p>{{ 'Try a different search term.' if search else 'Listings in this status will appear here.' }}</p>
+    </div>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function refreshAdminBulk() {
+  const checked = Array.from(document.querySelectorAll('.admin-bulk-checkbox')).filter(c => c.checked);
+  document.getElementById('admin-bulk-bar').classList.toggle('hidden', checked.length === 0);
+  document.getElementById('admin-selected-count').textContent = checked.length;
+}
+document.addEventListener('change', e => {
+  if (e.target.classList && e.target.classList.contains('admin-bulk-checkbox')) refreshAdminBulk();
+  if (e.target.id === 'admin-select-all' || e.target.id === 'admin-select-all-th') {
+    document.querySelectorAll('.admin-bulk-checkbox').forEach(c => { c.checked = e.target.checked; });
+    refreshAdminBulk();
+  }
+});
+
+function setAdminBulkAction(action) {
+  if (action === 'delete' && !confirm('Delete the selected listings? This cannot be undone.')) return;
+  const form = document.getElementById('admin-bulk-form');
+  document.querySelectorAll('input[name="listing_ids"][type="hidden"]').forEach(el => el.remove());
+  const checked = Array.from(document.querySelectorAll('.admin-bulk-checkbox')).filter(c => c.checked);
+  if (!checked.length) return;
+  checked.forEach(c => {
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'listing_ids'; input.value = c.value;
+    form.appendChild(input);
+  });
+  document.getElementById('admin-bulk-action-input').value = action;
+  form.requestSubmit();
+}
+
+function promptAdminReject() {
+  const reason = prompt('Rejection reason (applied to all selected listings):');
+  if (reason === null) return;
+  const form = document.getElementById('admin-bulk-form');
+  let reasonInput = form.querySelector('input[name="reason"]');
+  if (!reasonInput) {
+    reasonInput = document.createElement('input');
+    reasonInput.type = 'hidden'; reasonInput.name = 'reason';
+    form.appendChild(reasonInput);
+  }
+  reasonInput.value = reason;
+  setAdminBulkAction('reject');
+}
+
+function quickApprove(listingId) {
+  const form = document.getElementById('admin-bulk-form');
+  document.querySelectorAll('input[name="listing_ids"][type="hidden"]').forEach(el => el.remove());
+  const input = document.createElement('input');
+  input.type = 'hidden'; input.name = 'listing_ids'; input.value = listingId;
+  form.appendChild(input);
+  document.getElementById('admin-bulk-action-input').value = 'approve';
+  form.requestSubmit();
+}
+</script>
 {% endblock %}

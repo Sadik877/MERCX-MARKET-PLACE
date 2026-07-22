@@ -10,13 +10,13 @@
       <p style="color:var(--text-muted);font-size:.88rem">{{ total }} products found</p>
     </div>
     <div class="flex items-center gap-3">
-      <!-- Mobile filters toggle -->
-      <button id="filter-drawer-open" class="btn btn-ghost btn-sm lg:hidden">
-        <i data-feather="sliders" style="width:14px;height:14px"></i> Filters
-      </button>
+      <div class="view-toggle" id="view-toggle">
+        <button type="button" id="view-grid-btn" class="active" title="Grid view"><i data-feather="grid" style="width:15px;height:15px"></i></button>
+        <button type="button" id="view-list-btn" title="List view"><i data-feather="list" style="width:15px;height:15px"></i></button>
+      </div>
       <select onchange="location.href=this.value" class="input" style="width:auto">
         {% for val, label in [('popular','Most Popular'),('newest','Newest'),('price_low','Price: Low→High'),('price_high','Price: High→Low'),('rating','Top Rated')] %}
-        <option value="{{ url_for('marketplace.index', sort=val, category=request.args.get('category','')) }}"
+        <option value="{{ url_for('marketplace.index', sort=val, category=request.args.get('category',''), min_price=min_price, max_price=max_price) }}"
                 {% if sort == val %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
@@ -24,11 +24,11 @@
   </div>
 
   <div class="flex gap-5">
-    <!-- Sidebar filters (desktop) -->
+    <!-- Sidebar filters -->
     <aside style="width:220px;flex-shrink:0" class="hidden lg:block">
       <div class="card" style="position:sticky;top:80px">
         <h3 class="font-display font-semibold text-sm mb-3" style="color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Categories</h3>
-        <div class="space-y-1">
+        <div class="space-y-1 mb-5">
           <a href="{{ url_for('marketplace.index', sort=sort) }}"
              class="sidebar-link {% if not current_category %}active{% endif %}" style="margin:0;padding:.5rem .75rem">
             All Products
@@ -43,46 +43,41 @@
           </a>
           {% endfor %}
         </div>
+
+        <h3 class="font-display font-semibold text-sm mb-3" style="color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Price Range</h3>
+        <form action="{{ url_for('marketplace.index') }}" method="GET">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          {% if current_category %}<input type="hidden" name="category" value="{{ current_category.slug }}">{% endif %}
+          <div class="flex items-center gap-2 mb-3">
+            <input type="number" name="min_price" class="input" style="padding:.5rem .6rem;font-size:.82rem" placeholder="Min" value="{{ min_price }}" min="0">
+            <span style="color:var(--text-dim)">–</span>
+            <input type="number" name="max_price" class="input" style="padding:.5rem .6rem;font-size:.82rem" placeholder="Max" value="{{ max_price }}" min="0">
+          </div>
+          <button type="submit" class="btn btn-outline btn-sm w-full justify-center">Apply</button>
+          {% if min_price or max_price %}
+          <a href="{{ url_for('marketplace.index', sort=sort, category=request.args.get('category','')) }}" class="btn btn-ghost btn-sm w-full justify-center mt-2">Clear</a>
+          {% endif %}
+        </form>
       </div>
     </aside>
 
-    <!-- Mobile filter drawer -->
-    <div id="filter-drawer-backdrop" class="filter-drawer-backdrop hidden"></div>
-    <div id="filter-drawer" class="filter-drawer hidden">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="font-display font-bold">Categories</h3>
-        <button id="filter-drawer-close" class="btn btn-ghost btn-sm p-2"><i data-feather="x" style="width:16px;height:16px"></i></button>
-      </div>
-      <div class="space-y-1">
-        <a href="{{ url_for('marketplace.index', sort=sort) }}"
-           class="sidebar-link {% if not current_category %}active{% endif %}" style="margin:0;padding:.65rem .75rem">
-          All Products
-        </a>
-        {% for cat in categories %}
-        <a href="{{ url_for('marketplace.index', category=cat.slug, sort=sort) }}"
-           class="sidebar-link {% if current_category and current_category.id == cat.id %}active{% endif %}"
-           style="margin:0;padding:.65rem .75rem">
-          <span style="width:8px;height:8px;border-radius:50%;background:{{ cat.color or 'var(--primary)' }};display:inline-block;flex-shrink:0"></span>
-          {{ cat.name }}
-          <span class="ml-auto text-xs" style="color:var(--text-dim)">{{ cat.listing_count or 0 }}</span>
-        </a>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- Product grid -->
+    <!-- Product grid/list -->
     <div style="flex:1;min-width:0">
       {% if listings %}
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div id="product-grid-view" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {% for listing in listings %}
-        <div class="product-card reveal">
-          <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" style="text-decoration:none;display:contents">
+        <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" class="product-card reveal" style="text-decoration:none">
           {% if listing.preview_images %}
             <img src="{{ listing.preview_images[0] }}" class="product-card__img" loading="lazy" alt="{{ listing.title }}">
           {% else %}
             <div class="product-card__img-placeholder">
               <i data-feather="package" style="width:32px;height:32px;opacity:.3"></i>
             </div>
+          {% endif %}
+          {% if listing.is_featured %}
+          <div style="position:absolute;top:.5rem;left:.5rem">
+            <span class="badge badge-warning" style="font-size:.65rem">⭐ Featured</span>
+          </div>
           {% endif %}
           <div class="product-card__body">
             <div class="product-card__title">{{ listing.title }}</div>
@@ -100,26 +95,6 @@
               {% endif %}
             </div>
           </div>
-          </a>
-          <div class="product-card__badges">
-            {% if listing.is_featured %}<span class="badge badge-warning" style="font-size:.65rem">⭐ Featured</span>{% endif %}
-            {% if (listing.sales_count or 0) >= 20 %}<span class="badge badge-bestseller" style="font-size:.65rem">🔥 Bestseller</span>{% endif %}
-          </div>
-          <div class="product-card__quick">
-            <button type="button" class="product-card__icon-btn" title="Quick view"
-                    data-quick-view
-                    data-title="{{ listing.title }}"
-                    data-image="{{ listing.preview_images[0] if listing.preview_images else '' }}"
-                    data-price="{{ '%.2f'|format(listing.price|float) }}"
-                    data-rating="{{ '%.1f'|format(listing.rating|float) }}"
-                    data-reviews="{{ listing.review_count or 0 }}"
-                    data-href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}">
-              <i data-feather="eye" style="width:15px;height:15px"></i>
-            </button>
-            <button data-wishlist="{{ listing.id }}" class="product-card__icon-btn {% if listing.id in wishlist_ids %}active{% endif %}" title="Wishlist">
-              <i data-feather="heart" style="width:14px;height:14px{% if listing.id in wishlist_ids %};fill:#EF4444;stroke:#EF4444{% endif %}"></i>
-            </button>
-          </div>
           <div class="product-card__footer" onclick="event.stopPropagation()">
             <form method="POST" action="{{ url_for('marketplace.cart_add', listing_id=listing.id) }}" style="flex:1">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -127,40 +102,64 @@
                 <i data-feather="shopping-cart" style="width:13px;height:13px"></i> Add to Cart
               </button>
             </form>
+            <button data-wishlist="{{ listing.id }}" class="btn btn-ghost btn-sm p-2 {% if listing.id in wishlist_ids %}active{% endif %}"
+                    style="color:{{ '#EF4444' if listing.id in wishlist_ids else 'var(--text-muted)' }}">
+              <i data-feather="heart" style="width:14px;height:14px{% if listing.id in wishlist_ids %};fill:#EF4444;stroke:#EF4444{% endif %}"></i>
+            </button>
           </div>
+        </a>
+        {% endfor %}
+      </div>
+
+      <!-- List view -->
+      <div id="product-list-view" class="product-list-view hidden">
+        {% for listing in listings %}
+        <div class="product-list-row">
+          {% if listing.preview_images %}
+          <img src="{{ listing.preview_images[0] }}" class="product-list-thumb" alt="">
+          {% else %}
+          <div class="product-list-thumb flex items-center justify-center"><i data-feather="package" style="width:16px;height:16px;color:var(--text-dim)"></i></div>
+          {% endif %}
+          <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" style="flex:1;min-width:0;text-decoration:none">
+            <div class="font-semibold text-sm truncate" style="color:var(--text)">{{ listing.title }}</div>
+            <div class="product-card__rating">
+              <span style="color:#F59E0B">★</span> {{ '%.1f'|format(listing.rating|float) }}
+              <span style="color:var(--text-dim)">({{ listing.review_count or 0 }}) · {{ listing.sales_count or 0 }} sold</span>
+            </div>
+          </a>
+          {% if listing.is_featured %}<span class="badge badge-warning">Featured</span>{% endif %}
+          <span class="font-semibold" style="width:80px;text-align:right;color:var(--primary-light)">${{ '%.2f'|format(listing.price|float) }}</span>
+          <form method="POST" action="{{ url_for('marketplace.cart_add', listing_id=listing.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm"><i data-feather="shopping-cart" style="width:13px;height:13px"></i></button>
+          </form>
+          <button data-wishlist="{{ listing.id }}" class="btn btn-ghost btn-sm p-2 {% if listing.id in wishlist_ids %}active{% endif %}"
+                  style="color:{{ '#EF4444' if listing.id in wishlist_ids else 'var(--text-muted)' }}">
+            <i data-feather="heart" style="width:14px;height:14px{% if listing.id in wishlist_ids %};fill:#EF4444;stroke:#EF4444{% endif %}"></i>
+          </button>
         </div>
         {% endfor %}
       </div>
+
       <!-- Pagination -->
       {% if pages > 1 %}
       <div class="flex justify-center mt-8">
         <div class="pagination">
           {% for p in range(1, pages+1) %}
-          <a href="{{ url_for('marketplace.index', page=p, sort=sort, category=request.args.get('category','')) }}"
+          <a href="{{ url_for('marketplace.index', page=p, sort=sort, category=request.args.get('category',''), min_price=min_price, max_price=max_price) }}"
              class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
           {% endfor %}
         </div>
       </div>
       {% endif %}
       {% else %}
-      <div style="text-align:center;padding:5rem 2rem">
-        <i data-feather="search" style="width:48px;height:48px;color:var(--text-dim);margin-bottom:1rem"></i>
-        <h3 class="font-display text-xl font-bold mb-2">No products found</h3>
-        <p style="color:var(--text-muted)">Try a different category or check back later.</p>
+      <div class="empty-state">
+        <div class="icon-wrap"><i data-feather="search" style="width:28px;height:28px"></i></div>
+        <h4>No products found</h4>
+        <p>Try a different category, price range, or check back later.</p>
       </div>
       {% endif %}
     </div>
-  </div>
-</div>
-
-<!-- Quick View Modal -->
-<div id="quick-view-modal" class="modal-backdrop hidden">
-  <div class="modal" style="max-width:640px">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="font-display font-bold text-lg">Quick View</h3>
-      <button id="quick-view-close" class="btn btn-ghost btn-sm p-2"><i data-feather="x" style="width:16px;height:16px"></i></button>
-    </div>
-    <div id="quick-view-body" class="quick-view-body"></div>
   </div>
 </div>
 {% endblock %}

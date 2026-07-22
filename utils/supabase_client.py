@@ -1,4 +1,3 @@
-import time
 from supabase import create_client, Client
 from flask import current_app
 import functools
@@ -59,128 +58,82 @@ def get_supabase() -> Client:
     return _client
 
 
-def reset_client() -> None:
-    """Force a reconnect on the next db_* call. Used automatically after a
-    transient connection error, and can be called manually after rotating
-    Supabase keys without restarting the process."""
-    global _client
-    _client = None
-
-
-# ── Transient-error retry ─────────────────────────────────────
-# Network blips (DNS resolution failing for a second right after a cold
-# start, brief timeouts, connection resets) are common and self-resolving.
-# Retrying these specific error classes — and only these — avoids masking
-# real bugs (bad queries, permission errors, etc. fail immediately as before).
-_TRANSIENT_HINTS = (
-    "timeout", "timed out", "connection", "temporarily unavailable",
-    "reset by peer", "broken pipe", "502", "503", "504",
-    "name or service not known", "nodename nor servname",
-    "temporary failure in name resolution", "getaddrinfo",
-    "no address associated with hostname", "errno -2",
-    "network is unreachable",
-)
-
-
-def _is_transient(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(hint in msg for hint in _TRANSIENT_HINTS)
-
-
-def _with_retry(fn, what: str, retries: int = 2, backoff: float = 0.4):
-    """Run fn() with a couple of retries for transient errors only.
-    Returns (ok: bool, result_or_exception)."""
-    last_exc = None
-    for attempt in range(retries + 1):
-        try:
-            return True, fn()
-        except Exception as e:
-            last_exc = e
-            if attempt < retries and _is_transient(e):
-                time.sleep(backoff * (attempt + 1))
-                reset_client()
-                continue
-            break
-    current_app.logger.error(f"{what} error: {last_exc}")
-    return False, last_exc
-
-
 # ── Convenience wrappers ──────────────────────────────────────
 
 def db_select(table: str, columns: str = "*", filters: dict | None = None,
               order: str | None = None, limit: int | None = None,
               single: bool = False):
-    """Generic SELECT helper. Returns data list (or dict if single=True).
-    On failure (including transient network errors, retried automatically):
-    returns None if single=True, else an empty list — never raises."""
-    def _run():
-        q = get_supabase().table(table).select(columns)
-        for col, val in (filters or {}).items():
-            q = q.eq(col, val)
-        if order:
-            desc = order.startswith("-")
-            q = q.order(order.lstrip("-"), desc=desc)
-        if limit:
-            q = q.limit(limit)
-        if single:
+    """Generic SELECT helper. Returns data list (or dict if single=True)."""
+    q = get_supabase().table(table).select(columns)
+    for col, val in (filters or {}).items():
+        q = q.eq(col, val)
+    if order:
+        desc = order.startswith("-")
+        q = q.order(order.lstrip("-"), desc=desc)
+    if limit:
+        q = q.limit(limit)
+    if single:
+        try:
             return q.single().execute().data
-        return q.execute().data or []
-
-    ok, result = _with_retry(_run, f"db_select({table})")
-    if not ok:
-        return None if single else []
-    return result
+        except Exception:
+            return None
+    return q.execute().data or []
 
 
 def db_insert(table: str, data: dict):
     """INSERT a row and return the created record."""
-    def _run():
+    try:
         res = get_supabase().table(table).insert(data).execute()
         return res.data[0] if res.data else None
-    ok, result = _with_retry(_run, f"db_insert({table})", retries=0)
-    return result if ok else None
+    except Exception as e:
+        current_app.logger.error(f"db_insert({table}): {e}")
+        return None
 
 
 def db_update(table: str, data: dict, filters: dict):
     """UPDATE rows matching filters. Returns list of updated rows."""
-    def _run():
+    try:
         q = get_supabase().table(table).update(data)
         for col, val in filters.items():
             q = q.eq(col, val)
         res = q.execute()
         return res.data or []
-    ok, result = _with_retry(_run, f"db_update({table})", retries=0)
-    return result if ok else []
+    except Exception as e:
+        current_app.logger.error(f"db_update({table}): {e}")
+        return []
 
 
 def db_delete(table: str, filters: dict):
     """DELETE rows matching filters."""
-    def _run():
+    try:
         q = get_supabase().table(table).delete()
         for col, val in filters.items():
             q = q.eq(col, val)
         q.execute()
         return True
-    ok, _ = _with_retry(_run, f"db_delete({table})", retries=0)
-    return ok
+    except Exception as e:
+        current_app.logger.error(f"db_delete({table}): {e}")
+        return False
 
 
 def db_upsert(table: str, data: dict, on_conflict: str):
     """UPSERT a row."""
-    def _run():
+    try:
         res = get_supabase().table(table).upsert(data, on_conflict=on_conflict).execute()
         return res.data[0] if res.data else None
-    ok, result = _with_retry(_run, f"db_upsert({table})", retries=0)
-    return result if ok else None
+    except Exception as e:
+        current_app.logger.error(f"db_upsert({table}): {e}")
+        return None
 
 
 def db_rpc(fn: str, params: dict | None = None):
     """Call a Postgres RPC/function."""
-    def _run():
+    try:
         res = get_supabase().rpc(fn, params or {}).execute()
         return res.data
-    ok, result = _with_retry(_run, f"db_rpc({fn})", retries=0)
-    return result if ok else None
+    except Exception as e:
+        current_app.logger.error(f"db_rpc({fn}): {e}")
+        return None
 
 
 # ── Storage helpers ───────────────────────────────────────────
@@ -188,26 +141,29 @@ def db_rpc(fn: str, params: dict | None = None):
 def storage_upload(bucket: str, path: str, file_bytes: bytes,
                    content_type: str = "application/octet-stream") -> str | None:
     """Upload bytes to Supabase Storage. Returns public URL or None."""
-    def _run():
+    try:
         sb = get_supabase()
         sb.storage.from_(bucket).upload(path, file_bytes, {"content-type": content_type})
         return sb.storage.from_(bucket).get_public_url(path)
-    ok, result = _with_retry(_run, f"storage_upload({path})", retries=1)
-    return result if ok else None
+    except Exception as e:
+        current_app.logger.error(f"storage_upload({path}): {e}")
+        return None
 
 
 def storage_delete(bucket: str, path: str) -> bool:
-    def _run():
+    try:
         get_supabase().storage.from_(bucket).remove([path])
         return True
-    ok, _ = _with_retry(_run, f"storage_delete({path})", retries=1)
-    return ok
+    except Exception as e:
+        current_app.logger.error(f"storage_delete({path}): {e}")
+        return False
 
 
 def storage_signed_url(bucket: str, path: str, expires_in: int = 3600) -> str | None:
     """Generate a signed URL for private file access."""
-    def _run():
+    try:
         res = get_supabase().storage.from_(bucket).create_signed_url(path, expires_in)
         return res.get("signedURL") or res.get("signedUrl")
-    ok, result = _with_retry(_run, f"storage_signed_url({path})", retries=1)
-    return result if ok else None
+    except Exception as e:
+        current_app.logger.error(f"storage_signed_url({path}): {e}")
+        return None

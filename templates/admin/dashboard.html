@@ -1,48 +1,38 @@
 {% extends 'admin/base.html' %}
 {% block title %}Admin Dashboard — MercX Digital{% endblock %}
 {% block page_content %}
-<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-  <div>
-    <h1 class="font-display text-2xl font-bold">Platform Overview</h1>
-    <p style="color:var(--text-muted);font-size:.88rem">Real-time marketplace statistics</p>
-  </div>
-  <div class="flex gap-3 flex-wrap">
-    {% if pending_deposits or pending_withdrawals %}
-    <a href="{{ url_for('admin.wallet') }}" class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#FCA5A5">
-      <i data-feather="alert-circle" style="width:14px;height:14px"></i>
-      {{ pending_deposits + pending_withdrawals }} Pending Payments
-    </a>
-    {% endif %}
-    {% if pending_approval %}
-    <a href="{{ url_for('admin.listings', status='pending') }}" class="btn btn-sm" style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#FCD34D">
-      <i data-feather="clock" style="width:14px;height:14px"></i>
-      {{ pending_approval }} Listings to Review
-    </a>
-    {% endif %}
-    {% if pending_reports %}
-    <a href="{{ url_for('admin.reports') }}" class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#FCA5A5">
-      <i data-feather="flag" style="width:14px;height:14px"></i>
-      {{ pending_reports }} Reports
-    </a>
-    {% endif %}
-    {% if open_tickets %}
-    <a href="{{ url_for('admin.support') }}" class="btn btn-sm" style="background:rgba(6,182,212,.12);border:1px solid rgba(6,182,212,.3);color:#67e8f9">
-      <i data-feather="headphones" style="width:14px;height:14px"></i>
-      {{ open_tickets }} Open Tickets
-    </a>
-    {% endif %}
+
+<!-- ── Header ─────────────────────────────────────────────────── -->
+<div class="seller-hero mb-6 reveal" style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(124,58,237,.06));border-color:rgba(245,158,11,.2)">
+  <div class="flex flex-wrap items-center justify-between gap-4" style="position:relative;z-index:1">
+    <div>
+      <h1 class="font-display text-xl font-bold">Platform Overview</h1>
+      <p style="font-size:.85rem;color:var(--text-muted)">Real-time marketplace statistics</p>
+    </div>
+    <div class="flex gap-3 flex-wrap">
+      {% if pending_deposits or pending_withdrawals %}
+      <a href="{{ url_for('admin.wallet') }}" class="btn btn-sm" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#FCA5A5">
+        <i data-feather="alert-circle" style="width:14px;height:14px"></i>
+        {{ pending_deposits + pending_withdrawals }} Pending Payments
+      </a>
+      {% endif %}
+      {% if pending_approval %}
+      <a href="{{ url_for('admin.listings', status='pending') }}" class="btn btn-sm" style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#FCD34D">
+        <i data-feather="clock" style="width:14px;height:14px"></i>
+        {{ pending_approval }} Listings to Review
+      </a>
+      {% endif %}
+    </div>
   </div>
 </div>
 
-<!-- Stats -->
-<div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
+<!-- ── Stat Grid ──────────────────────────────────────────────── -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
   {% for val, label, icon, color, bg in [
     (total_users,      'Total Users',    'users',         '#7C3AED','rgba(124,58,237,.12)'),
     (total_sellers,    'Sellers',        'store',         '#06B6D4','rgba(6,182,212,.12)'),
     (total_listings,   'Live Products',  'package',       '#10B981','rgba(16,185,129,.12)'),
-    (total_orders,     'Total Orders',   'shopping-bag',  '#EC4899','rgba(236,72,153,.12)'),
     ('$'~'%.2f'|format(total_revenue|float),'Revenue','dollar-sign','#F59E0B','rgba(245,158,11,.12)'),
-    ('$'~'%.2f'|format(platform_fees|float),'Platform Fees','percent','#8B5CF6','rgba(139,92,246,.12)'),
   ] %}
   <div class="stat-card reveal">
     <div class="stat-icon" style="background:{{ bg }};color:{{ color }}">
@@ -53,72 +43,148 @@
   {% endfor %}
 </div>
 
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+  {% for val, label, icon, color in [
+    (pending_approval, 'Pending Listings', 'clock',  '#F59E0B'),
+    (pending_reports,  'Open Reports',     'flag',   '#EF4444'),
+    (open_tickets,     'Open Tickets',     'headphones', '#06B6D4'),
+    ('$'~'%.2f'|format(platform_fees|float), 'Platform Fees', 'percent', '#10B981'),
+  ] %}
+  <div class="stat-pill reveal">
+    <div class="flex items-center gap-2 mb-2">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:{{ color }}1f;color:{{ color }}">
+        <i data-feather="{{ icon }}" style="width:15px;height:15px"></i>
+      </div>
+    </div>
+    <div class="value">{{ val }}</div>
+    <div class="label" style="margin-top:.3rem;margin-bottom:0">{{ label }}</div>
+  </div>
+  {% endfor %}
+</div>
+
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-  <!-- Revenue chart -->
   <div class="card reveal">
     <div class="flex items-center justify-between mb-4">
       <h3 class="font-display font-bold">Monthly Revenue (12 months)</h3>
       <span class="badge badge-success">Total: ${{ '%.2f'|format(total_revenue|float) }}</span>
     </div>
+    {% if monthly_values and monthly_values|sum > 0 %}
     <canvas id="revenue-chart" height="100"></canvas>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="bar-chart-2" style="width:24px;height:24px"></i></div><h4>No revenue yet</h4><p>Platform revenue will appear here once orders complete.</p></div>
+    {% endif %}
   </div>
-  <!-- User growth -->
   <div class="card reveal">
     <div class="flex items-center justify-between mb-4">
       <h3 class="font-display font-bold">New Users (6 months)</h3>
       <span class="badge badge-primary">{{ total_users }} total</span>
     </div>
+    {% if user_values and user_values|sum > 0 %}
     <canvas id="user-chart" height="100"></canvas>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="users" style="width:24px;height:24px"></i></div><h4>No signups yet</h4><p>New user registrations will appear here.</p></div>
+    {% endif %}
   </div>
 </div>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-  <!-- Recent users -->
-  <div class="card reveal">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="font-display font-bold">Recent Users</h3>
-      <a href="{{ url_for('admin.users') }}" class="btn btn-ghost btn-sm">View All</a>
-    </div>
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>Username</th><th>Role</th><th>Joined</th></tr></thead>
-        <tbody>
-        {% for u in recent_users %}
-        <tr>
-          <td>
-            <a href="{{ url_for('admin.user_detail', user_id=u.id) }}" style="color:var(--primary-light);font-weight:600">{{ u.username }}</a>
-            <div style="font-size:.75rem;color:var(--text-dim)">{{ u.email }}</div>
-          </td>
-          <td><span class="badge badge-{{ 'warning' if u.role=='admin' else ('accent' if u.role=='seller' else 'neutral') }}">{{ u.role }}</span></td>
-          <td style="color:var(--text-muted);font-size:.82rem">{{ u.created_at[:10] }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
+<!-- ── Recent Activity (tabbed) ───────────────────────────────── -->
+<div class="card reveal" data-tab-group="admin-activity">
+  <h3 class="font-display font-bold mb-2">Recent Activity</h3>
+  <div class="tabs">
+    <button data-tab="users" class="tab active">New Users</button>
+    <button data-tab="orders" class="tab">Orders</button>
+    <button data-tab="pending" class="tab">Pending Listings</button>
+    <button data-tab="reports" class="tab">Reports</button>
+    <button data-tab="tickets" class="tab">Support</button>
   </div>
 
-  <!-- Recent orders -->
-  <div class="card reveal">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="font-display font-bold">Recent Orders</h3>
-      <a href="{{ url_for('admin.orders') }}" class="btn btn-ghost btn-sm">View All</a>
-    </div>
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>Order</th><th>Total</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for o in recent_orders %}
-        {% set sc={'completed':'success','pending':'warning','cancelled':'danger','refunded':'neutral'} %}
-        <tr>
-          <td><span class="font-mono text-xs" style="color:var(--primary-light)">{{ o.order_number }}</span></td>
-          <td class="font-semibold">${{ '%.2f'|format(o.total|float) }}</td>
-          <td><span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span></td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
+  <div data-panel="users">
+    {% if recent_users %}
+      {% for u in recent_users %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i data-feather="user-plus" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <a href="{{ url_for('admin.user_detail', user_id=u.id) }}" class="text-sm font-semibold" style="color:var(--text)">{{ u.username }}</a>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ u.email }} · {{ u.created_at[:10] }}</div>
+        </div>
+        <span class="badge badge-{{ 'warning' if u.role=='admin' else ('accent' if u.role=='seller' else 'neutral') }}">{{ u.role }}</span>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('admin.users') }}" class="btn btn-ghost btn-sm mt-2">View all users</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="users" style="width:24px;height:24px"></i></div><h4>No users yet</h4></div>
+    {% endif %}
+  </div>
+
+  <div data-panel="orders" class="hidden">
+    {% if recent_orders %}
+      {% for o in recent_orders %}
+      {% set sc={'completed':'success','pending':'warning','cancelled':'danger','refunded':'neutral'} %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(6,182,212,.15);color:#06B6D4"><i data-feather="shopping-bag" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold font-mono">{{ o.order_number }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ o.created_at[:10] }}</div>
+        </div>
+        <span class="badge badge-{{ sc.get(o.status,'neutral') }}">{{ o.status }}</span>
+        <span class="font-semibold ml-2">${{ '%.2f'|format(o.total|float) }}</span>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('admin.orders') }}" class="btn btn-ghost btn-sm mt-2">View all orders</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="shopping-bag" style="width:24px;height:24px"></i></div><h4>No orders yet</h4></div>
+    {% endif %}
+  </div>
+
+  <div data-panel="pending" class="hidden">
+    {% if recent_pending_listings %}
+      {% for l in recent_pending_listings %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(245,158,11,.15);color:#F59E0B"><i data-feather="clock" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ l.title }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">by {{ l.seller.username if l.seller else '—' }} · ${{ '%.2f'|format(l.price|float) }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('admin.listings', status='pending') }}" class="btn btn-ghost btn-sm mt-2">Review all pending listings</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="check-circle" style="width:24px;height:24px"></i></div><h4>Nothing pending</h4><p>All listings have been reviewed.</p></div>
+    {% endif %}
+  </div>
+
+  <div data-panel="reports" class="hidden">
+    {% if recent_reports %}
+      {% for r in recent_reports %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(239,68,68,.12);color:#EF4444"><i data-feather="flag" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ r.listing.title if r.listing else 'Unknown listing' }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ r.reason }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('admin.reports') }}" class="btn btn-ghost btn-sm mt-2">View all reports</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="flag" style="width:24px;height:24px"></i></div><h4>No open reports</h4></div>
+    {% endif %}
+  </div>
+
+  <div data-panel="tickets" class="hidden">
+    {% if recent_tickets %}
+      {% for t in recent_tickets %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(6,182,212,.15);color:#06B6D4"><i data-feather="headphones" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ t.subject }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ t.user.username if t.user else '—' }} · {{ t.priority }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('admin.support') }}" class="btn btn-ghost btn-sm mt-2">View all tickets</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="check-circle" style="width:24px;height:24px"></i></div><h4>No open tickets</h4></div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
@@ -133,12 +199,14 @@ const chartDefaults = {
     y: { grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#94A3B8' } }
   }
 };
-new Chart(document.getElementById('revenue-chart'), {
+const revEl = document.getElementById('revenue-chart');
+if (revEl) new Chart(revEl, {
   type: 'line',
   data: { labels: {{ monthly_labels|tojson }}, datasets: [{ label: '$', data: {{ monthly_values|tojson }}, borderColor: '#7C3AED', backgroundColor: 'rgba(124,58,237,.1)', fill: true, tension: 0.4, borderWidth: 2.5, pointRadius: 3 }] },
   options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, ticks: { ...chartDefaults.scales.y.ticks, callback: v => '$'+v } } } }
 });
-new Chart(document.getElementById('user-chart'), {
+const userEl = document.getElementById('user-chart');
+if (userEl) new Chart(userEl, {
   type: 'bar',
   data: { labels: {{ user_labels|tojson }}, datasets: [{ data: {{ user_values|tojson }}, backgroundColor: 'rgba(6,182,212,.5)', borderColor: '#06B6D4', borderWidth: 2, borderRadius: 6 }] },
   options: chartDefaults

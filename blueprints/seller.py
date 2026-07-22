@@ -1,5 +1,7 @@
+import csv
+import io
 from flask import (Blueprint, render_template, redirect, url_for,
-                   request, session, flash, current_app, jsonify)
+                   request, session, flash, current_app, jsonify, Response)
 from datetime import datetime, timezone, timedelta
 from utils.supabase_client import (db_select, db_insert, db_update,
                                    db_delete, storage_upload)
@@ -32,20 +34,24 @@ def dashboard():
     sid = _seller_id()
 
     # Quick stats
-    listings   = db_select("listings", "id,status,sales_count,views,rating",
+    listings   = db_select("listings", "id,title,slug,status,sales_count,views,rating,review_count",
                            filters={"seller_id": sid})
     active     = [l for l in listings if l["status"] == "active"]
     pending_ap = [l for l in listings if l["status"] == "pending"]
-    rejected   = [l for l in listings if l["status"] == "rejected"]
-    # NOTE: There is no 'draft' listing status in the schema's CHECK constraint
-    # (listings.status only allows pending/active/paused/rejected/deleted).
-    # TODO: to support real Draft products, add 'draft' to that CHECK constraint
-    # and default new incomplete listings to it instead of 'pending'.
 
-    rated = [l for l in listings if l.get("rating")]
-    avg_rating = round(sum(float(l["rating"]) for l in rated) / len(rated), 2) if rated else 0
+    # NOTE (schema TODO): The `listings.status` CHECK constraint only allows
+    # 'pending' | 'active' | 'paused' | 'rejected' | 'deleted'. There is no
+    # true "draft" state (an unsubmitted, unpublished work-in-progress).
+    # To support real draft products, add a boolean column, e.g.:
+    #     ALTER TABLE public.listings ADD COLUMN is_draft BOOLEAN DEFAULT FALSE;
+    # and treat draft creation as an insert with is_draft=true, status left
+    # NULL/pending until the seller explicitly submits for review. Until that
+    # migration exists, draft_count is always 0 and the Drafts tab is a
+    # non-functional placeholder in the UI (by design, per instructions not
+    # to implement schema-dependent features without the migration).
+    draft_count = 0
 
-    orders_all = db_select("orders", "id,status,total,seller_earnings,created_at",
+    orders_all = db_select("orders", "id,status,total,seller_earnings,created_at,buyer_id,order_number",
                            filters={"seller_id": sid}, order="-created_at")
     pending_orders = [o for o in orders_all if o["status"] in ("pending", "processing")]
     completed      = [o for o in orders_all if o["status"] == "completed"]
@@ -53,10 +59,30 @@ def dashboard():
     total_revenue = sum(float(o["total"]) for o in completed)
     total_sales   = len(completed)
     total_views   = sum(int(l.get("views") or 0) for l in listings)
-    conversion_rate = round((total_sales / total_views * 100), 2) if total_views > 0 else 0
 
-    # Earnings still tied up in orders that haven't completed yet
+    # Pending balance: earnings on orders not yet completed (i.e. not yet
+    # credited to the wallet by deliver_order()). This is fully derivable
+    # from existing columns — no schema change needed.
     pending_balance = sum(float(o.get("seller_earnings") or 0) for o in pending_orders)
+
+    # Average rating across the seller's listings (weighted by review count).
+    total_reviews_wt = sum(int(l.get("review_count") or 0) for l in listings)
+    if total_reviews_wt > 0:
+        avg_rating = sum(float(l.get("rating") or 0) * int(l.get("review_count") or 0)
+                         for l in listings) / total_reviews_wt
+    else:
+        avg_rating = 0.0
+
+    conversion_rate = round((total_sales / total_views * 100), 2) if total_views > 0 else 0.0
+
+    # Total downloads across all of this seller's sold order items.
+    seller_order_ids = [o["id"] for o in orders_all]
+    total_downloads = 0
+    if seller_order_ids:
+        # db_select doesn't support "IN" filtering, so aggregate per-order.
+        for oid in seller_order_ids:
+            items = db_select("order_items", "download_count", filters={"order_id": oid})
+            total_downloads += sum(int(i.get("download_count") or 0) for i in items)
 
     # Monthly revenue (last 6 months)
     monthly = {}
@@ -68,36 +94,37 @@ def dashboard():
     monthly_values = [monthly.get(m, 0) for m in monthly_labels]
 
     # Recent orders
-    recent_orders = orders_all[:10]
+    recent_orders = orders_all[:6]
 
-    # Recent reviews
+    # Recent sales (completed only)
+    recent_sales = completed[:6]
+
+    # Recent reviews (across all of the seller's listings)
     recent_reviews = db_select("reviews", "*", filters={"seller_id": sid},
-                               order="-created_at", limit=5)
+                               order="-created_at", limit=6)
+    for r in recent_reviews:
+        buyer = db_select("users", "id,username", filters={"id": r["buyer_id"]}, single=True)
+        r["buyer"] = buyer
+
+    # Recent messages (conversations involving this seller)
+    convos_1 = db_select("conversations", "*", filters={"participant_1": sid}, order="-last_message_at")
+    convos_2 = db_select("conversations", "*", filters={"participant_2": sid}, order="-last_message_at")
+    recent_messages = (convos_1 + convos_2)
+    recent_messages.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
+    recent_messages = recent_messages[:6]
+    for c in recent_messages:
+        other_id = c["participant_2"] if c["participant_1"] == sid else c["participant_1"]
+        other    = db_select("users", "id,username", filters={"id": other_id}, single=True)
+        c["other_user"] = other
 
     # Recent withdrawals
     recent_withdrawals = db_select("wallet_transactions", "*",
                                    filters={"user_id": sid, "type": "withdrawal"},
-                                   order="-created_at", limit=5)
+                                   order="-created_at", limit=6)
 
     # Recent notifications
     recent_notifications = db_select("notifications", "*", filters={"user_id": sid},
-                                     order="-created_at", limit=5)
-
-    # Recent messages (conversations where this seller is either participant)
-    recent_messages = db_select("conversations", "*", filters={"participant_1": sid},
-                                order="-last_message_at", limit=5)
-    recent_messages += db_select("conversations", "*", filters={"participant_2": sid},
-                                 order="-last_message_at", limit=5)
-    recent_messages.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
-    recent_messages = recent_messages[:5]
-    for c in recent_messages:
-        other_id = c["participant_2"] if c["participant_1"] == sid else c["participant_1"]
-        other = db_select("users", "id,username", filters={"id": other_id}, single=True)
-        c["other_user"] = other
-        c["unread"] = c["unread_count_1"] if c["participant_1"] == sid else c["unread_count_2"]
-        last_msgs = db_select("messages", "content", filters={"conversation_id": c["id"]},
-                              order="-created_at", limit=1)
-        c["last_message_preview"] = last_msgs[0]["content"] if last_msgs else ""
+                                     order="-created_at", limit=6)
 
     # Pending manual deliveries
     manual_pending = []
@@ -107,28 +134,30 @@ def dashboard():
         if items:
             manual_pending.append({"order": o, "items": items})
 
-    user    = db_select("users", "id,username,balance", filters={"id": sid}, single=True)
+    user    = db_select("users", "id,username,balance,is_verified", filters={"id": sid}, single=True)
     profile = db_select("user_profiles", "*", filters={"user_id": sid}, single=True)
 
     return render_template("seller/dashboard.html",
         user=user, profile=profile,
-        balance=float((user or {}).get("balance", 0)),
-        pending_balance=pending_balance,
-        avg_rating=avg_rating,
-        conversion_rate=conversion_rate,
         total_listings=len(listings),
         active_listings=len(active),
         pending_approval=len(pending_ap),
-        rejected_listings=len(rejected),
+        draft_count=draft_count,
         pending_orders=len(pending_orders),
         total_revenue=total_revenue,
         total_sales=total_sales,
+        total_orders=len(orders_all),
         total_views=total_views,
+        total_downloads=total_downloads,
+        avg_rating=avg_rating,
+        conversion_rate=conversion_rate,
+        pending_balance=pending_balance,
         recent_orders=recent_orders,
+        recent_sales=recent_sales,
         recent_reviews=recent_reviews,
+        recent_messages=recent_messages,
         recent_withdrawals=recent_withdrawals,
         recent_notifications=recent_notifications,
-        recent_messages=recent_messages,
         manual_pending=manual_pending,
         monthly_labels=monthly_labels,
         monthly_values=monthly_values,
@@ -389,42 +418,91 @@ def activate_listing(listing_id):
 @seller_bp.route("/duplicate/<listing_id>", methods=["POST"])
 @seller_required
 def duplicate_listing(listing_id):
+    """Create a copy of an existing listing as a new pending draft-for-review."""
     sid     = _seller_id()
     listing = db_select("listings", "*", filters={"id": listing_id, "seller_id": sid}, single=True)
     if not listing:
         flash("Listing not found.", "danger")
         return redirect(url_for("seller.inventory"))
 
+    new_title = f"{listing['title']} (Copy)"
     copy_data = {
-        "seller_id":     sid,
-        "category_id":   listing.get("category_id"),
-        "title":         f"{listing['title']} (Copy)",
-        "slug":          make_slug(f"{listing['title']}-copy-{int(datetime.now().timestamp())}"),
-        "description":   listing.get("description"),
-        "short_description": listing.get("short_description"),
-        "price":         listing.get("price"),
-        "compare_price": listing.get("compare_price"),
-        "license_type":  listing.get("license_type"),
-        "version":       listing.get("version"),
-        "demo_url":      listing.get("demo_url"),
-        "documentation_url": listing.get("documentation_url"),
-        "support_included":  listing.get("support_included"),
+        "seller_id":          sid,
+        "category_id":        listing.get("category_id"),
+        "title":              new_title,
+        "slug":               make_slug(new_title),
+        "description":        listing.get("description"),
+        "short_description":  listing.get("short_description"),
+        "price":              listing.get("price"),
+        "compare_price":      listing.get("compare_price"),
+        "license_type":       listing.get("license_type"),
+        "version":            listing.get("version"),
+        "file_format":        listing.get("file_format"),
+        "demo_url":           listing.get("demo_url"),
+        "documentation_url":  listing.get("documentation_url"),
+        "support_included":   listing.get("support_included"),
         "support_duration_days": listing.get("support_duration_days"),
-        "updates_included": listing.get("updates_included"),
-        "delivery_type": listing.get("delivery_type"),
-        "tags":          listing.get("tags"),
-        "file_format":   listing.get("file_format"),
-        "preview_images": listing.get("preview_images"),
-        "status":        "pending",
-        "is_approved":   False,
+        "updates_included":   listing.get("updates_included"),
+        "delivery_type":      listing.get("delivery_type"),
+        "tags":               listing.get("tags"),
+        "status":             "pending",
+        "is_approved":        False,
     }
     new_listing = db_insert("listings", copy_data)
-    if new_listing:
-        log_audit(sid, "duplicate_listing", resource_type="listing", resource_id=new_listing["id"],
-                  details={"source_listing_id": listing_id})
-        flash("Listing duplicated. Review and edit the copy before it goes live.", "success")
-    else:
-        flash("Failed to duplicate listing. Please try again.", "danger")
+    if not new_listing:
+        flash("Failed to duplicate listing.", "danger")
+        return redirect(url_for("seller.inventory"))
+
+    # Copy image references (same URLs — files themselves aren't re-uploaded)
+    images = db_select("listing_images", "*", filters={"listing_id": listing_id})
+    for img in images:
+        db_insert("listing_images", {
+            "listing_id": new_listing["id"],
+            "url":        img["url"],
+            "is_primary": img.get("is_primary", False),
+            "sort_order": img.get("sort_order", 0),
+        })
+
+    log_audit(sid, "duplicate_listing", resource_type="listing",
+              resource_id=new_listing["id"], details={"source": listing_id})
+    flash(f'Duplicated as "{new_title}". Edit and resubmit for review.', "success")
+    return redirect(url_for("seller.edit_listing", listing_id=new_listing["id"]))
+
+
+@seller_bp.route("/bulk-action", methods=["POST"])
+@seller_required
+def bulk_action():
+    """Apply pause / activate / delete to multiple listings at once.
+    Reuses the exact same per-item logic as the single-item routes above —
+    no new business rules introduced."""
+    sid         = _seller_id()
+    action      = request.form.get("action", "")
+    listing_ids = request.form.getlist("listing_ids")
+
+    if not listing_ids:
+        flash("No products selected.", "warning")
+        return redirect(url_for("seller.inventory"))
+
+    count = 0
+    for lid in listing_ids:
+        if action == "pause":
+            db_update("listings", {"status": "paused"}, {"id": lid, "seller_id": sid})
+            count += 1
+        elif action == "activate":
+            listing = db_select("listings", "is_approved",
+                                filters={"id": lid, "seller_id": sid}, single=True)
+            if listing and listing.get("is_approved"):
+                db_update("listings", {"status": "active"}, {"id": lid, "seller_id": sid})
+                count += 1
+        elif action == "delete":
+            db_update("listings", {
+                "status": "deleted",
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+            }, {"id": lid, "seller_id": sid})
+            count += 1
+
+    log_audit(sid, "bulk_listing_action", details={"action": action, "count": count})
+    flash(f"{count} product(s) updated.", "success")
     return redirect(url_for("seller.inventory"))
 
 
@@ -436,7 +514,6 @@ def inventory():
     sid    = _seller_id()
     status = request.args.get("status", "")
     search = request.args.get("q", "").strip().lower()
-    sort   = request.args.get("sort", "newest")
     page   = int(request.args.get("page", 1))
 
     filters = {"seller_id": sid}
@@ -448,17 +525,6 @@ def inventory():
     if search:
         listings = [l for l in listings if search in (l.get("title") or "").lower()]
 
-    sort_key = {
-        "newest":     lambda l: l.get("created_at") or "",
-        "oldest":     lambda l: l.get("created_at") or "",
-        "price_high": lambda l: float(l.get("price") or 0),
-        "price_low":  lambda l: float(l.get("price") or 0),
-        "sales":      lambda l: int(l.get("sales_count") or 0),
-        "views":      lambda l: int(l.get("views") or 0),
-    }.get(sort)
-    if sort_key:
-        listings.sort(key=sort_key, reverse=sort not in ("oldest", "price_low"))
-
     per_page  = 20
     total     = len(listings)
     start     = (page - 1) * per_page
@@ -467,7 +533,7 @@ def inventory():
 
     return render_template("seller/inventory.html",
         listings=paginated, status=status,
-        search=search, sort=sort, page=page, pages=pages, total=total)
+        search=search, page=page, pages=pages, total=total)
 
 
 # ── Orders (Incoming) ─────────────────────────────────────────
@@ -477,7 +543,6 @@ def inventory():
 def orders():
     sid    = _seller_id()
     status = request.args.get("status", "")
-    search = request.args.get("q", "").strip().lower()
     page   = int(request.args.get("page", 1))
 
     filters = {"seller_id": sid}
@@ -489,13 +554,7 @@ def orders():
         buyer = db_select("users", "id,username,email",
                           filters={"id": o["buyer_id"]}, single=True)
         o["buyer"] = buyer
-        o["order_items"] = db_select("order_items", "*", filters={"order_id": o["id"]})
-
-    if search:
-        all_orders = [o for o in all_orders if
-                      search in o["id"].lower()
-                      or search in ((o.get("buyer") or {}).get("username") or "").lower()
-                      or search in ((o.get("buyer") or {}).get("email") or "").lower()]
+        o["items"] = db_select("order_items", "*", filters={"order_id": o["id"]})
 
     per_page  = 20
     total     = len(all_orders)
@@ -504,7 +563,45 @@ def orders():
     pages     = max(1, -(-total // per_page))
 
     return render_template("seller/orders.html",
-        orders=paginated, status=status, search=search, page=page, pages=pages, total=total)
+        orders=paginated, status=status, page=page, pages=pages, total=total)
+
+
+@seller_bp.route("/orders/export")
+@seller_required
+def export_orders():
+    """Export the seller's orders as a CSV file. Pure read-only, no schema change."""
+    sid    = _seller_id()
+    status = request.args.get("status", "")
+    filters = {"seller_id": sid}
+    if status:
+        filters["status"] = status
+
+    all_orders = db_select("orders", "*", filters=filters, order="-created_at")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Order Number", "Status", "Subtotal", "Discount",
+                     "Platform Fee", "Total", "Seller Earnings",
+                     "Payment Method", "Created At"])
+    for o in all_orders:
+        writer.writerow([
+            o.get("order_number", ""),
+            o.get("status", ""),
+            o.get("subtotal", 0),
+            o.get("discount_amount", 0),
+            o.get("platform_fee", 0),
+            o.get("total", 0),
+            o.get("seller_earnings", 0),
+            o.get("payment_method", ""),
+            o.get("created_at", ""),
+        ])
+
+    log_audit(sid, "export_orders", details={"count": len(all_orders)})
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=mercx_orders.csv"},
+    )
 
 
 @seller_bp.route("/orders/<order_id>/deliver", methods=["POST"])
@@ -572,15 +669,23 @@ def analytics():
                            filters={"seller_id": sid})
     completed  = [o for o in orders_all if o["status"] == "completed"]
 
-    # Revenue by month (last 12 months)
-    monthly = {}
-    for o in completed:
+    # Revenue / Sales / Orders by month (last 12 months)
+    monthly_rev   = {}
+    monthly_sales = {}
+    monthly_ord   = {}
+    for o in orders_all:
         m = (o.get("created_at") or "")[:7]
-        if m:
-            monthly[m] = monthly.get(m, 0) + float(o["total"])
+        if not m:
+            continue
+        monthly_ord[m] = monthly_ord.get(m, 0) + 1
+        if o["status"] == "completed":
+            monthly_rev[m]   = monthly_rev.get(m, 0) + float(o["total"])
+            monthly_sales[m] = monthly_sales.get(m, 0) + 1
 
-    months_12     = sorted(monthly)[-12:]
-    revenue_data  = [monthly.get(m, 0) for m in months_12]
+    months_12     = sorted(set(monthly_rev) | set(monthly_ord))[-12:]
+    revenue_data  = [monthly_rev.get(m, 0) for m in months_12]
+    sales_data    = [monthly_sales.get(m, 0) for m in months_12]
+    orders_data   = [monthly_ord.get(m, 0) for m in months_12]
 
     # Top listings by sales
     top_listings = db_select(
@@ -589,10 +694,33 @@ def analytics():
     )
 
     # Conversion: views vs sales
-    total_views = sum(int(l.get("views") or 0) for l in
-                      db_select("listings", "views", filters={"seller_id": sid}))
+    all_seller_listings = db_select("listings", "views,download_count",
+                                     filters={"seller_id": sid})
+    total_views = sum(int(l.get("views") or 0) for l in all_seller_listings)
     total_sales = len(completed)
     conversion  = round((total_sales / total_views * 100), 2) if total_views > 0 else 0
+
+    # Total downloads (aggregate — see dashboard() for the same derivation)
+    total_downloads = 0
+    for o in orders_all:
+        items = db_select("order_items", "download_count", filters={"order_id": o["id"]})
+        total_downloads += sum(int(i.get("download_count") or 0) for i in items)
+
+    # NOTE (schema TODO): "Visitors" (unique daily page-view counts) cannot
+    # be charted over time with the current schema. `listings.views` is a
+    # single running counter incremented on each page load — it has no
+    # per-day granularity and doesn't dedupe by visitor. To support a real
+    # Visitors-over-time chart, add an events table, e.g.:
+    #     CREATE TABLE public.listing_view_events (
+    #         id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    #         listing_id UUID REFERENCES public.listings(id),
+    #         visitor_hash TEXT,           -- hashed IP/session for dedup
+    #         viewed_at TIMESTAMPTZ DEFAULT NOW()
+    #     );
+    # and log a row on each listing view. Until that migration exists, the
+    # Visitors chart intentionally shows an empty state rather than
+    # fabricated data.
+    has_visitor_data = False
 
     # Wallet
     user = db_select("users", "balance", filters={"id": sid}, single=True)
@@ -600,45 +728,20 @@ def analytics():
     return render_template("seller/analytics.html",
         monthly_labels=months_12,
         monthly_values=revenue_data,
+        sales_labels=months_12,
+        sales_values=sales_data,
+        orders_labels=months_12,
+        orders_values=orders_data,
         top_listings=top_listings,
         total_orders=len(orders_all),
         completed_orders=total_sales,
         total_views=total_views,
+        total_downloads=total_downloads,
         conversion_rate=conversion,
         total_revenue=sum(revenue_data),
         balance=float((user or {}).get("balance", 0)),
+        has_visitor_data=has_visitor_data,
     )
-
-
-# ── Reviews ────────────────────────────────────────────────────
-
-@seller_bp.route("/reviews")
-@seller_required
-def reviews():
-    sid    = _seller_id()
-    rating_filter = request.args.get("rating", "")
-
-    all_reviews = db_select("reviews", "*", filters={"seller_id": sid}, order="-created_at")
-    for r in all_reviews:
-        buyer = db_select("users", "id,username", filters={"id": r["buyer_id"]}, single=True)
-        listing = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
-        r["buyer"] = buyer
-        r["listing"] = listing
-
-    rating_counts = {n: len([r for r in all_reviews if r["rating"] == n]) for n in range(1, 6)}
-    avg_rating = round(sum(r["rating"] for r in all_reviews) / len(all_reviews), 2) if all_reviews else 0
-
-    filtered = all_reviews
-    if rating_filter:
-        try:
-            filtered = [r for r in all_reviews if r["rating"] == int(rating_filter)]
-        except ValueError:
-            pass
-
-    return render_template("seller/reviews.html",
-        reviews=filtered, total=len(all_reviews),
-        rating_counts=rating_counts, avg_rating=avg_rating,
-        rating_filter=rating_filter)
 
 
 # ── Store Settings ────────────────────────────────────────────
@@ -655,7 +758,6 @@ def store_settings():
         website    = request.form.get("website", "").strip()[:255]
         twitter    = request.form.get("twitter", "").strip()[:100]
         github     = request.form.get("github", "").strip()[:100]
-        linkedin   = request.form.get("linkedin", "").strip()[:100]
 
         from python_slugify import slugify as _slugify
         slug = _slugify(store_name)
@@ -667,7 +769,6 @@ def store_settings():
             "website":           website,
             "twitter":           twitter,
             "github":            github,
-            "linkedin":          linkedin,
         }, {"user_id": sid})
 
         # Banner upload
@@ -684,3 +785,82 @@ def store_settings():
         return redirect(url_for("seller.store_settings"))
 
     return render_template("seller/store_settings.html", profile=prof)
+
+
+# ── Reviews ───────────────────────────────────────────────────
+
+@seller_bp.route("/reviews")
+@seller_required
+def reviews():
+    sid    = _seller_id()
+    rating_filter = request.args.get("rating", "")
+    page   = int(request.args.get("page", 1))
+
+    filters = {"seller_id": sid}
+    if rating_filter:
+        filters["rating"] = int(rating_filter)
+
+    all_reviews = db_select("reviews", "*", filters=filters, order="-created_at")
+    for r in all_reviews:
+        buyer = db_select("users", "id,username", filters={"id": r["buyer_id"]}, single=True)
+        bprof = db_select("user_profiles", "avatar_url", filters={"user_id": r["buyer_id"]}, single=True)
+        listing = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
+        r["buyer"]   = buyer
+        r["avatar"]  = bprof.get("avatar_url") if bprof else None
+        r["listing"] = listing
+
+    # Rating breakdown across ALL of this seller's reviews (unfiltered)
+    unfiltered = db_select("reviews", "rating", filters={"seller_id": sid})
+    total_count = len(unfiltered)
+    avg_rating  = (sum(r["rating"] for r in unfiltered) / total_count) if total_count else 0
+    rating_counts = {i: sum(1 for r in unfiltered if r["rating"] == i) for i in range(1, 6)}
+
+    per_page  = 15
+    total     = len(all_reviews)
+    start     = (page - 1) * per_page
+    paginated = all_reviews[start: start + per_page]
+    pages     = max(1, -(-total // per_page))
+
+    return render_template("seller/reviews.html",
+        reviews=paginated, rating_filter=rating_filter,
+        avg_rating=avg_rating, total_count=total_count,
+        rating_counts=rating_counts,
+        page=page, pages=pages, total=total)
+
+
+# ── Withdrawals ───────────────────────────────────────────────
+
+@seller_bp.route("/withdrawals")
+@seller_required
+def withdrawals():
+    sid  = _seller_id()
+    user = db_select("users", "id,username,balance", filters={"id": sid}, single=True)
+
+    all_tx = db_select("wallet_transactions", "*",
+                       filters={"user_id": sid, "type": "withdrawal"},
+                       order="-created_at")
+    pending_tx   = [t for t in all_tx if t["status"] == "pending"]
+    completed_tx = [t for t in all_tx if t["status"] == "completed"]
+    cancelled_tx = [t for t in all_tx if t["status"] == "cancelled"]
+
+    # Pending balance: earnings not yet released (see dashboard() for derivation)
+    orders_pending = db_select("orders", "seller_earnings,status",
+                               filters={"seller_id": sid})
+    pending_balance = sum(
+        float(o.get("seller_earnings") or 0)
+        for o in orders_pending if o["status"] in ("pending", "processing")
+    )
+
+    total_withdrawn = sum(float(t["amount"]) for t in completed_tx)
+
+    cfg = current_app.config
+    return render_template("seller/withdrawals.html",
+        user=user,
+        available_balance=float((user or {}).get("balance", 0)),
+        pending_balance=pending_balance,
+        total_withdrawn=total_withdrawn,
+        all_tx=all_tx, pending_tx=pending_tx,
+        completed_tx=completed_tx, cancelled_tx=cancelled_tx,
+        min_withdrawal=cfg.get("MIN_WITHDRAWAL", 10),
+        max_withdrawal=cfg.get("MAX_WITHDRAWAL", 10000),
+    )

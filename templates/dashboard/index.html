@@ -1,116 +1,188 @@
 {% extends 'dashboard/base.html' %}
 {% block title %}Dashboard — MercX Digital{% endblock %}
 {% block page_content %}
-<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-  <div>
-    <h1 class="font-display text-2xl font-bold">Welcome back, {{ current_username }} 👋</h1>
-    <p style="color:var(--text-muted);font-size:.9rem">Here's what's happening with your account.</p>
-  </div>
-  <div class="flex gap-2">
-    {% if unread_notifications > 0 %}
-    <a href="{{ url_for('dashboard.notifications') }}" class="btn btn-ghost btn-sm">
-      <i data-feather="bell" style="width:15px;height:15px"></i> {{ unread_notifications }} New
-    </a>
-    {% endif %}
-    <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary btn-sm">
-      <i data-feather="shopping-bag" style="width:15px;height:15px"></i> Browse Products
-    </a>
+
+<!-- ── Welcome Header ─────────────────────────────────────────── -->
+<div class="seller-hero mb-6 reveal">
+  <div class="flex flex-wrap items-center justify-between gap-4" style="position:relative;z-index:1">
+    <div class="flex items-center gap-4">
+      {% if profile and profile.avatar_url %}
+      <img src="{{ profile.avatar_url }}" class="w-14 h-14 rounded-2xl object-cover flex-shrink-0" alt="">
+      {% else %}
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 text-xl font-bold text-white"
+           style="background:linear-gradient(135deg,#7C3AED,#06B6D4)">
+        {{ (current_username or 'U')[0].upper() }}
+      </div>
+      {% endif %}
+      <div>
+        <h1 class="font-display text-xl font-bold">Welcome back, {{ current_username }} 👋</h1>
+        <p style="font-size:.85rem;color:var(--text-muted)">Here's what's happening with your account.</p>
+      </div>
+    </div>
+    <div class="flex gap-3 flex-wrap">
+      <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary">
+        <i data-feather="shopping-bag" style="width:15px;height:15px"></i> Browse Products
+      </a>
+      {% if current_role not in ('seller','admin') %}
+      <a href="{{ url_for('seller.become_seller') }}" class="btn" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:var(--text)">
+        <i data-feather="zap" style="width:15px;height:15px"></i> Start Selling
+      </a>
+      {% endif %}
+    </div>
   </div>
 </div>
 
-<!-- Balance card -->
-<div class="wallet-card mb-6 reveal">
-  <p style="font-size:.82rem;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.5rem;font-family:'Space Grotesk',sans-serif">Wallet Balance</p>
-  <div class="wallet-balance mb-4">${{ '%.2f'|format(current_balance|float) }}</div>
-  <div class="flex gap-3 flex-wrap relative z-10">
-    <a href="{{ url_for('dashboard.wallet') }}" class="btn btn-sm" style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff">
-      <i data-feather="plus" style="width:14px;height:14px"></i> Add Funds
-    </a>
-    <a href="{{ url_for('dashboard.wallet') }}" class="btn btn-sm" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.8)">
-      <i data-feather="trending-down" style="width:14px;height:14px"></i> Withdraw
-    </a>
+<!-- ── Wallet Row ─────────────────────────────────────────────── -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+  <div class="wallet-card reveal" style="padding:1.5rem">
+    <p style="position:relative;z-index:1;font-size:.72rem;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.08em;font-family:'Space Grotesk',sans-serif;margin-bottom:.4rem">Wallet Balance</p>
+    <div style="position:relative;z-index:1" class="font-display font-bold text-2xl gradient-text">${{ '%.2f'|format(current_balance|float) }}</div>
+    <a href="{{ url_for('dashboard.wallet') }}" style="position:relative;z-index:1;font-size:.78rem;color:#a78bfa;display:inline-block;margin-top:.5rem">Manage wallet →</a>
+  </div>
+  <div class="stat-pill reveal">
+    <div class="label">Total Spent</div>
+    <div class="value" style="color:var(--primary-light)">${{ '%.2f'|format(total_spent|float) }}</div>
+    <div class="sub">{{ total_purchases }} completed purchase{{ 's' if total_purchases != 1 }}</div>
+  </div>
+  <div class="stat-pill reveal">
+    <div class="label">Total Deposited</div>
+    <div class="value" style="color:var(--success)">${{ '%.2f'|format(total_deposit|float) }}</div>
+    <div class="sub">All-time wallet funding</div>
   </div>
 </div>
 
-<!-- Stats -->
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+<!-- ── Stat Grid ──────────────────────────────────────────────── -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
   {% set stats = [
-    ('shopping-bag', 'Total Spent',    '$'~'%.2f'|format(total_spent|float),   '#7C3AED', 'rgba(124,58,237,.12)'),
-    ('download',     'Downloads',      total_purchases,                         '#06B6D4', 'rgba(6,182,212,.12)'),
-    ('heart',        'Wishlist',       wishlist_count,                           '#EF4444', 'rgba(239,68,68,.12)'),
-    ('trending-up',  'Total Earned',   '$'~'%.2f'|format(total_earned|float),   '#10B981', 'rgba(16,185,129,.12)'),
+    ('shopping-bag', 'Total Orders',    total_orders,          '#7C3AED'),
+    ('download',     'Downloads',       total_purchases,       '#06B6D4'),
+    ('heart',        'Wishlist Items',  wishlist_count,        '#EF4444'),
+    ('bell',         'Unread Alerts',   unread_notifications,  '#F59E0B'),
   ] %}
-  {% for icon, label, val, color, bg in stats %}
-  <div class="stat-card reveal">
-    <div class="stat-icon" style="background:{{ bg }};color:{{ color }}">
-      <i data-feather="{{ icon }}" style="width:22px;height:22px"></i>
+  {% for icon, label, val, color in stats %}
+  <div class="stat-pill reveal">
+    <div class="flex items-center gap-2 mb-2">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:{{ color }}1f;color:{{ color }}">
+        <i data-feather="{{ icon }}" style="width:15px;height:15px"></i>
+      </div>
     </div>
-    <div>
-      <div class="stat-value">{{ val }}</div>
-      <div class="stat-label">{{ label }}</div>
-    </div>
+    <div class="value">{{ val }}</div>
+    <div class="label" style="margin-top:.3rem;margin-bottom:0">{{ label }}</div>
   </div>
   {% endfor %}
 </div>
 
-<!-- Recent purchases -->
-<div class="card reveal mb-6">
-  <div class="flex items-center justify-between mb-5">
-    <h2 class="font-display text-lg font-bold">Recent Purchases</h2>
-    <a href="{{ url_for('dashboard.purchases') }}" class="btn btn-ghost btn-sm">View All</a>
+{% if current_role in ('seller','admin') and total_earned > 0 %}
+<div class="stat-pill mb-6 reveal" style="max-width:320px">
+  <div class="label">Total Earned as Seller</div>
+  <div class="value" style="color:var(--success)">${{ '%.2f'|format(total_earned|float) }}</div>
+  <a href="{{ url_for('seller.dashboard') }}" style="font-size:.78rem;color:#a78bfa">Go to Seller Dashboard →</a>
+</div>
+{% endif %}
+
+<!-- ── Recent Activity (tabbed) ───────────────────────────────── -->
+<div class="card reveal" data-tab-group="buyer-activity">
+  <h3 class="font-display font-bold mb-2">Recent Activity</h3>
+  <div class="tabs">
+    <button data-tab="purchases" class="tab active">Purchases</button>
+    <button data-tab="wishlist" class="tab">Wishlist</button>
+    <button data-tab="messages" class="tab">Messages</button>
+    <button data-tab="notifications" class="tab">Notifications</button>
+    {% if sales %}<button data-tab="sales" class="tab">Sales</button>{% endif %}
   </div>
-  {% if purchases %}
-  <div class="table-wrap">
-    <table class="table">
-      <thead><tr>
-        <th>Order</th><th>Date</th><th>Total</th><th>Status</th><th></th>
-      </tr></thead>
-      <tbody>
+
+  <!-- Purchases -->
+  <div data-panel="purchases">
+    {% if purchases %}
       {% for order in purchases %}
-      <tr>
-        <td><span class="font-mono text-sm" style="color:var(--primary-light)">{{ order.order_number }}</span></td>
-        <td style="color:var(--text-muted);font-size:.85rem">{{ order.created_at[:10] }}</td>
-        <td class="font-semibold">${{ '%.2f'|format(order.total|float) }}</td>
-        <td>
-          {% set sc = {'completed':'success','pending':'warning','cancelled':'danger','refunded':'neutral'} %}
-          <span class="badge badge-{{ sc.get(order.status,'neutral') }}">{{ order.status }}</span>
-        </td>
-        <td><a href="{{ url_for('dashboard.purchases') }}" class="btn btn-ghost btn-sm">View</a></td>
-      </tr>
+      {% set sc = {'completed':'success','pending':'warning','cancelled':'danger','refunded':'neutral'} %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i data-feather="shopping-bag" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold font-mono">{{ order.order_number }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ order.created_at[:10] }}</div>
+        </div>
+        <span class="badge badge-{{ sc.get(order.status,'neutral') }}">{{ order.status }}</span>
+        <span class="font-semibold ml-2">${{ '%.2f'|format(order.total|float) }}</span>
+      </div>
       {% endfor %}
-      </tbody>
-    </table>
+      <a href="{{ url_for('dashboard.purchases') }}" class="btn btn-ghost btn-sm mt-2">View all downloads</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="shopping-bag" style="width:24px;height:24px"></i></div><h4>No purchases yet</h4><p>Discover thousands of digital products made by talented creators.</p>
+      <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary btn-sm mt-3">Browse Marketplace</a>
+    </div>
+    {% endif %}
   </div>
-  {% else %}
-  <div style="text-align:center;padding:3rem 1rem">
-    <i data-feather="shopping-bag" style="width:40px;height:40px;color:var(--text-dim);margin-bottom:1rem"></i>
-    <p style="color:var(--text-muted)">No purchases yet.</p>
-    <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary btn-sm mt-3">Browse Products</a>
+
+  <!-- Wishlist -->
+  <div data-panel="wishlist" class="hidden">
+    {% if recent_wishlist %}
+      {% for l in recent_wishlist %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(239,68,68,.12);color:#EF4444"><i data-feather="heart" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <a href="{{ url_for('marketplace.listing_detail', slug=l.slug) }}" class="text-sm font-semibold" style="color:var(--text)">{{ l.title }}</a>
+        </div>
+        <span class="font-semibold">${{ '%.2f'|format(l.price|float) }}</span>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('dashboard.wishlist') }}" class="btn btn-ghost btn-sm mt-2">View full wishlist</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="heart" style="width:24px;height:24px"></i></div><h4>Your wishlist is empty</h4><p>Save products you love for later.</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Messages -->
+  <div data-panel="messages" class="hidden">
+    {% if recent_messages %}
+      {% for c in recent_messages %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(6,182,212,.15);color:#06B6D4"><i data-feather="message-circle" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ c.other_user.username if c.other_user else 'User' }}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">{{ (c.last_message_at or '')[:16].replace('T',' ') }}</div>
+        </div>
+        <a href="{{ url_for('dashboard.messages', conversation=c.id) }}" class="btn btn-ghost btn-sm">Open</a>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="message-circle" style="width:24px;height:24px"></i></div><h4>No messages yet</h4><p>Conversations with sellers will appear here.</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Notifications -->
+  <div data-panel="notifications" class="hidden">
+    {% if recent_notifications %}
+      {% for n in recent_notifications %}
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(139,92,246,.15);color:#8B5CF6"><i data-feather="{{ n.icon or 'bell' }}" style="width:16px;height:16px"></i></div>
+        <div style="flex:1">
+          <div class="text-sm font-semibold">{{ n.title }}</div>
+          <div class="truncate-2" style="font-size:.78rem;color:var(--text-muted)">{{ n.message }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <a href="{{ url_for('dashboard.notifications') }}" class="btn btn-ghost btn-sm mt-2">View all notifications</a>
+    {% else %}
+    <div class="empty-state"><div class="icon-wrap"><i data-feather="bell" style="width:24px;height:24px"></i></div><h4>No notifications yet</h4><p>You're all caught up.</p></div>
+    {% endif %}
+  </div>
+
+  {% if sales %}
+  <!-- Sales (only shown to sellers) -->
+  <div data-panel="sales" class="hidden">
+    {% for order in sales %}
+    <div class="activity-item">
+      <div class="activity-icon" style="background:rgba(16,185,129,.15);color:#10B981"><i data-feather="dollar-sign" style="width:16px;height:16px"></i></div>
+      <div style="flex:1">
+        <div class="text-sm font-semibold font-mono">{{ order.order_number }}</div>
+        <div style="font-size:.78rem;color:var(--text-muted)">{{ order.created_at[:10] }}</div>
+      </div>
+      <span class="font-semibold" style="color:var(--success)">${{ '%.2f'|format(order.total|float) }}</span>
+    </div>
+    {% endfor %}
+    <a href="{{ url_for('seller.orders') }}" class="btn btn-ghost btn-sm mt-2">View all in Seller Dashboard</a>
   </div>
   {% endif %}
 </div>
-
-{% if sales %}
-<div class="card reveal">
-  <div class="flex items-center justify-between mb-5">
-    <h2 class="font-display text-lg font-bold">Recent Sales</h2>
-    <a href="{{ url_for('seller.orders') }}" class="btn btn-ghost btn-sm">View All</a>
-  </div>
-  <div class="table-wrap">
-    <table class="table">
-      <thead><tr><th>Order</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
-      <tbody>
-      {% for order in sales %}
-      <tr>
-        <td><span class="font-mono text-sm" style="color:var(--accent)">{{ order.order_number }}</span></td>
-        <td style="color:var(--text-muted);font-size:.85rem">{{ order.created_at[:10] }}</td>
-        <td class="font-semibold" style="color:var(--success)">${{ '%.2f'|format(order.total|float) }}</td>
-        <td><span class="badge badge-{{ 'success' if order.status=='completed' else 'warning' }}">{{ order.status }}</span></td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
 {% endblock %}

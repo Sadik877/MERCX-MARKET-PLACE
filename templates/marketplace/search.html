@@ -10,7 +10,7 @@
   </div>
 
   <!-- Search bar -->
-  <form id="search-form" action="{{ url_for('main.search') }}" method="GET" class="flex gap-3 mb-3 flex-wrap">
+  <form action="{{ url_for('main.search') }}" method="GET" class="flex gap-3 mb-6 flex-wrap">
     <div style="position:relative;flex:1;min-width:240px">
       <i data-feather="search" style="position:absolute;left:.85rem;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--text-muted)"></i>
       <input type="text" name="q" class="input" style="padding-left:2.6rem" value="{{ q }}" placeholder="Search digital products…">
@@ -21,14 +21,6 @@
       <option value="{{ cat.id }}" {% if category == cat.id %}selected{% endif %}>{{ cat.name }}</option>
       {% endfor %}
     </select>
-    <input type="number" name="min_price" class="input" style="width:100px" placeholder="Min $" value="{{ min_price }}" min="0" step="0.01">
-    <input type="number" name="max_price" class="input" style="width:100px" placeholder="Max $" value="{{ max_price }}" min="0" step="0.01">
-    <select name="min_rating" class="input" style="width:auto">
-      <option value="">Any Rating</option>
-      {% for r in [4,3,2,1] %}
-      <option value="{{ r }}" {% if min_rating == r|string %}selected{% endif %}>{{ r }}★ & up</option>
-      {% endfor %}
-    </select>
     <select name="sort" class="input" style="width:auto">
       {% for val, label in [('relevance','Most Relevant'),('popular','Popular'),('newest','Newest'),('price_low','Price ↑'),('price_high','Price ↓'),('rating','Rating')] %}
       <option value="{{ val }}" {% if sort == val %}selected{% endif %}>{{ label }}</option>
@@ -37,39 +29,33 @@
     <button type="submit" class="btn btn-primary"><i data-feather="search" style="width:15px;height:15px"></i> Search</button>
   </form>
 
-  <!-- Recent & popular searches -->
-  <div id="recent-searches" class="flex flex-wrap gap-2 mb-6 hidden"></div>
-  {% if not q %}
-  <div class="flex flex-wrap items-center gap-2 mb-8">
-    <span style="font-size:.8rem;color:var(--text-dim)">Popular:</span>
-    {% for term in ['UI Kit','Notion Template','SaaS Boilerplate','Ebook','Icon Set','WordPress Theme'] %}
-    <a href="{{ url_for('main.search', q=term) }}" class="search-chip">{{ term }}</a>
-    {% endfor %}
-  </div>
-  {% endif %}
-
   {% if results %}
   <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
     {% for listing in results %}
     <div class="product-card reveal">
-      <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" style="text-decoration:none;display:contents">
-      {% if listing.preview_images %}
-        <img src="{{ listing.preview_images[0] }}" class="product-card__img" loading="lazy" alt="{{ listing.title }}">
-      {% else %}
-        <div class="product-card__img-placeholder"><i data-feather="package" style="width:32px;height:32px;opacity:.3"></i></div>
-      {% endif %}
-      <div class="product-card__body">
-        <div class="product-card__title">{{ listing.title }}</div>
-        <div class="product-card__rating">
-          <span style="color:#F59E0B">★</span> {{ '%.1f'|format(listing.rating|float) }}
-          <span style="color:var(--text-dim)">({{ listing.review_count or 0 }})</span>
+      <a href="{{ url_for('marketplace.listing_detail', slug=listing.slug) }}" style="text-decoration:none">
+        {% if listing.preview_images %}
+          <img src="{{ listing.preview_images[0] }}" class="product-card__img" loading="lazy" alt="">
+        {% else %}
+          <div class="product-card__img-placeholder"><i data-feather="package" style="width:32px;height:32px;opacity:.3"></i></div>
+        {% endif %}
+        <div class="product-card__body">
+          <div class="product-card__title">{{ listing.title }}</div>
+          <div class="product-card__rating"><span style="color:#F59E0B">★</span> {{ '%.1f'|format(listing.rating|float) }}</div>
+          <span class="product-card__price">${{ '%.2f'|format(listing.price|float) }}</span>
         </div>
-        <span class="product-card__price">${{ '%.2f'|format(listing.price|float) }}</span>
-      </div>
       </a>
-      {% if (listing.sales_count or 0) >= 20 %}
-      <div class="product-card__badges"><span class="badge badge-bestseller" style="font-size:.65rem">🔥 Bestseller</span></div>
-      {% endif %}
+      <div class="product-card__footer">
+        <form method="POST" action="{{ url_for('marketplace.cart_add', listing_id=listing.id) }}" style="flex:1">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm w-full justify-center">
+            <i data-feather="shopping-cart" style="width:13px;height:13px"></i> Add to Cart
+          </button>
+        </form>
+        <button data-wishlist="{{ listing.id }}" class="btn btn-ghost btn-sm p-2">
+          <i data-feather="heart" style="width:14px;height:14px"></i>
+        </button>
+      </div>
     </div>
     {% endfor %}
   </div>
@@ -77,18 +63,18 @@
   <div class="flex justify-center mt-8">
     <div class="pagination">
       {% for p in range(1, pages+1) %}
-      <a href="{{ url_for('main.search', q=q, page=p, sort=sort, category=category, min_price=min_price, max_price=max_price, min_rating=min_rating) }}"
+      <a href="{{ url_for('main.search', q=q, page=p, sort=sort, category=category) }}"
          class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
       {% endfor %}
     </div>
   </div>
   {% endif %}
   {% else %}
-  <div style="text-align:center;padding:5rem">
-    <i data-feather="search" style="width:48px;height:48px;color:var(--text-dim);margin-bottom:1rem"></i>
-    <h3 class="font-display text-xl font-bold mb-2">No results found</h3>
-    <p style="color:var(--text-muted)">Try different keywords, remove some filters, or browse our categories.</p>
-    <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary mt-4">Browse All Products</a>
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="search" style="width:28px;height:28px"></i></div>
+    <h4>No results found</h4>
+    <p>Try different keywords or browse our categories.</p>
+    <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary mt-3">Browse All Products</a>
   </div>
   {% endif %}
 </div>
