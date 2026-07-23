@@ -56,7 +56,18 @@ class Config:
 
     # ── Upload / File Limits ──────────────────────────────────
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", 52428800))  # 50 MB
-    ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "svg"}
+    # SECURITY (BUG-016): "svg" intentionally excluded. Uploaded listing/store
+    # images are served back to visitors as-is via Supabase Storage public
+    # URLs embedded directly in <img src="..."> — there is no app-layer proxy
+    # in front of them to add Content-Disposition/CSP headers or to sanitize
+    # the file on the way out. An SVG can embed <script>/event-handler
+    # payloads that execute in the visitor's browser when rendered inline,
+    # so allowing SVG upload here was a stored-XSS vector. Raster formats
+    # (png/jpg/jpeg/gif/webp) don't execute script content and remain safe
+    # to serve inline as-is. If SVG support is needed later, it must go
+    # through a sanitizer (e.g. a dedicated SVG-scrubbing library) on
+    # upload, not be re-added here as-is.
+    ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
     ALLOWED_FILE_EXTENSIONS  = {"zip", "rar", "tar", "gz", "7z", "pdf", "docx",
                                  "figma", "sketch", "xd", "psd", "ai", "mp3", "mp4",
                                  "ttf", "otf", "woff", "woff2", "csv", "json", "xml"}

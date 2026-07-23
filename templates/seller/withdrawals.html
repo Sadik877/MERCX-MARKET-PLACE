@@ -1,16 +1,41 @@
 {% extends 'seller/base.html' %}
 {% block title %}Withdrawals — MercX Digital{% endblock %}
 {% block page_content %}
-<h1 class="font-display text-2xl font-bold mb-6">Withdrawals</h1>
+
+<div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-display text-2xl font-bold">Withdrawals</h1>
+    <p style="color:var(--text-muted);font-size:.88rem;margin-top:.15rem">Cash out earnings to a saved payout account</p>
+  </div>
+  {% if accounts %}
+  <button onclick="document.getElementById('withdraw-modal').classList.remove('hidden')" class="btn btn-primary">
+    <i data-feather="trending-down" style="width:16px;height:16px"></i> Request Withdrawal
+  </button>
+  {% endif %}
+</div>
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} mb-5" role="alert">{{ msg }}</div>
+{% endfor %}
+{% endwith %}
 
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
   <div class="wallet-card reveal" style="padding:1.5rem">
     <p style="position:relative;z-index:1;font-size:.72rem;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.08em;font-family:'Space Grotesk',sans-serif;margin-bottom:.4rem">Available Balance</p>
     <div style="position:relative;z-index:1" class="font-display font-bold text-2xl gradient-text">${{ '%.2f'|format(available_balance|float) }}</div>
+    {% if accounts %}
     <button onclick="document.getElementById('withdraw-modal').classList.remove('hidden')"
             style="position:relative;z-index:1;font-size:.78rem;color:#a78bfa;background:none;border:none;cursor:pointer;padding:0;display:inline-block;margin-top:.5rem">
       Request withdrawal →
     </button>
+    {% else %}
+    <a href="{{ url_for('escrow.payout_account') }}"
+       style="position:relative;z-index:1;font-size:.78rem;color:#a78bfa;display:inline-block;margin-top:.5rem">
+      Add a payout account to unlock this →
+    </a>
+    {% endif %}
   </div>
   <div class="stat-pill reveal">
     <div class="label">Pending Balance</div>
@@ -20,27 +45,41 @@
   <div class="stat-pill reveal">
     <div class="label">Total Withdrawn</div>
     <div class="value" style="color:var(--success)">${{ '%.2f'|format(total_withdrawn|float) }}</div>
-    <div class="sub">{{ completed_tx|length }} completed withdrawal{{ 's' if completed_tx|length != 1 }}</div>
+    <div class="sub">{{ history|selectattr('status', 'equalto', 'completed')|list|length }} completed withdrawal{{ 's' if history|selectattr('status', 'equalto', 'completed')|list|length != 1 }}</div>
   </div>
 </div>
 
-<div class="flex justify-end mb-5">
-  <button onclick="document.getElementById('withdraw-modal').classList.remove('hidden')" class="btn btn-primary">
-    <i data-feather="trending-down" style="width:16px;height:16px"></i> Request Withdrawal
-  </button>
+{% if not accounts %}
+<div class="card mb-6" style="border-color:rgba(245,158,11,.25)">
+  <div class="flex items-start gap-3">
+    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(245,158,11,.15)">
+      <i data-feather="alert-triangle" style="width:16px;height:16px;color:#F59E0B"></i>
+    </div>
+    <div>
+      <div class="font-display font-semibold">No payout account on file</div>
+      <p style="font-size:.85rem;color:var(--text-muted);margin-top:.2rem;max-width:52ch">
+        Add a bank, Paystack, Flutterwave, PayPal, or crypto account so withdrawals go somewhere —
+        you can't request a payout until at least one is saved.
+      </p>
+      <a href="{{ url_for('escrow.payout_account') }}" class="btn btn-primary btn-sm mt-3">
+        <i data-feather="plus" style="width:14px;height:14px"></i> Add Payout Account
+      </a>
+    </div>
+  </div>
 </div>
+{% endif %}
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
   <!-- Pending requests with status timeline -->
   <div class="card lg:col-span-1 reveal">
     <h3 class="font-display font-bold mb-4">Pending Requests</h3>
-    {% if pending_tx %}
+    {% if pending_payouts %}
     <div class="timeline">
-      {% for tx in pending_tx %}
+      {% for p in pending_payouts %}
       <div class="timeline-item">
         <div class="timeline-dot" style="background:rgba(245,158,11,.2)"><i data-feather="clock" style="width:10px;height:10px;color:#F59E0B"></i></div>
-        <div class="font-semibold text-sm">${{ '%.2f'|format(tx.amount|float) }}</div>
-        <div style="font-size:.76rem;color:var(--text-muted)">{{ tx.payment_method or 'bank_transfer' }} · {{ tx.created_at[:10] }}</div>
+        <div class="font-semibold text-sm">${{ '%.2f'|format(p.amount|float) }}</div>
+        <div style="font-size:.76rem;color:var(--text-muted)">{{ ((p.destination or {}).get('method', p.method or 'bank_transfer'))|replace('_',' ')|title }} · {{ (p.requested_at or '')[:10] }}</div>
         <span class="badge badge-warning mt-1">Awaiting approval</span>
       </div>
       {% endfor %}
@@ -56,19 +95,19 @@
   <!-- Full history -->
   <div class="card lg:col-span-2 reveal">
     <h3 class="font-display font-bold mb-4">Withdrawal History</h3>
-    {% if all_tx %}
+    {% if history %}
     <div class="table-wrap responsive-cards" style="border:none">
       <table class="table">
         <thead><tr><th>Amount</th><th>Method</th><th>Reference</th><th>Date</th><th>Status</th></tr></thead>
         <tbody>
-        {% for tx in all_tx %}
+        {% for h in history %}
         <tr>
-          <td data-label="Amount" class="font-semibold font-mono">${{ '%.2f'|format(tx.amount|float) }}</td>
-          <td data-label="Method" style="font-size:.82rem;color:var(--text-muted)">{{ tx.payment_method or '—' }}</td>
-          <td data-label="Reference" style="font-size:.75rem;color:var(--text-dim);font-family:monospace">{{ tx.reference or '—' }}</td>
-          <td data-label="Date" style="font-size:.8rem;color:var(--text-muted)">{{ tx.created_at[:10] }}</td>
+          <td data-label="Amount" class="font-semibold font-mono">${{ '%.2f'|format(h.amount|float) }}</td>
+          <td data-label="Method" style="font-size:.82rem;color:var(--text-muted)">{{ (h.method or '—')|replace('_',' ')|title }}</td>
+          <td data-label="Reference" style="font-size:.75rem;color:var(--text-dim);font-family:monospace">{{ h.reference or '—' }}</td>
+          <td data-label="Date" style="font-size:.8rem;color:var(--text-muted)">{{ h.date or '—' }}</td>
           <td data-label="Status">
-            <span class="badge badge-{{ 'success' if tx.status=='completed' else ('warning' if tx.status=='pending' else 'danger') }}">{{ tx.status }}</span>
+            <span class="badge badge-{{ 'success' if h.status=='completed' else ('warning' if h.status=='pending' else 'danger') }}">{{ h.status }}</span>
           </td>
         </tr>
         {% endfor %}
@@ -84,7 +123,9 @@
   </div>
 </div>
 
-<!-- Withdraw Modal (reuses existing dashboard.wallet_withdraw endpoint — no new backend logic) -->
+{% if accounts %}
+<!-- Withdraw Modal — posts to the real payout pipeline (escrow.request_payout),
+     against a saved seller_payout_accounts row, not the legacy wallet_withdraw path. -->
 <div id="withdraw-modal" class="modal-backdrop hidden">
   <div class="modal">
     <div class="flex items-center justify-between mb-5">
@@ -93,7 +134,7 @@
         <i data-feather="x" style="width:16px;height:16px"></i>
       </button>
     </div>
-    <form method="POST" action="{{ url_for('dashboard.wallet_withdraw') }}">
+    <form method="POST" action="{{ url_for('escrow.request_payout') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
         <label class="form-label">Amount (min. ${{ min_withdrawal }}, max. ${{ max_withdrawal }})</label>
@@ -104,19 +145,21 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Withdrawal Method</label>
-        <select name="method" class="input">
-          <option value="bank_transfer">Bank Transfer</option>
-          <option value="paypal">PayPal</option>
-          <option value="crypto">Cryptocurrency</option>
+        <label class="form-label">Send to</label>
+        <select name="account_id" class="input" required>
+          {% for acct in accounts %}
+          <option value="{{ acct.id }}" {% if acct.is_default %}selected{% endif %}>
+            {{ acct.label or acct.method|replace('_',' ')|title }}{% if acct.is_default %} (default){% endif %}
+          </option>
+          {% endfor %}
         </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Payout Details</label>
-        <textarea name="details" class="input" placeholder="Bank account number, PayPal email, or crypto address" rows="3"></textarea>
+        <a href="{{ url_for('escrow.payout_account') }}" style="font-size:.76rem;color:#a78bfa;display:inline-block;margin-top:.4rem">
+          Manage payout accounts →
+        </a>
       </div>
       <button type="submit" class="btn btn-primary w-full justify-center">Request Withdrawal</button>
     </form>
   </div>
 </div>
+{% endif %}
 {% endblock %}

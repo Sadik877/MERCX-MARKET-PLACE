@@ -1,5 +1,5 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
-from utils.supabase_client import db_select, db_insert
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
+from utils.supabase_client import db_select, db_insert, get_supabase
 
 main_bp = Blueprint("main", __name__)
 
@@ -58,18 +58,62 @@ def search():
 
     results = []
     if q or category:
-        all_listings = db_select(
-            "listings",
-            "id,title,slug,price,compare_price,rating,review_count,sales_count,preview_images,category_id,seller_id,created_at",
-            filters={"status": "active", "is_approved": True},
-            order="-sales_count"
-        )
-        # Filter in Python (for simplicity; in production use Supabase full-text search)
+        listing_cols = ("id,title,slug,price,compare_price,rating,review_count,"
+                         "sales_count,preview_images,category_id,seller_id,created_at")
+
+        all_listings = None
+        if q:
+            # BUG-017 (partial): push the text match to Postgres via
+            # .text_search() instead of pulling every active listing into
+            # Python and running a substring check on the title. NOTE this
+            # queries to_tsvector('english', title) on the fly — it does NOT
+            # hit schema.sql's idx_listings_search GIN index, because that
+            # index is built on a concatenated title+short_description+
+            # description expression, and Supabase-py's text_search() only
+            # accepts a real column name, not an arbitrary expression. To
+            # actually use that index, a generated/stored tsvector column
+            # mirroring the index expression would need to be added via
+            # migration and queried instead — left as a follow-up (see
+            # BUG_INVENTORY.md / FIX_ROADMAP.md) since it needs a live DB to
+            # verify safely. This change still helps today: it moves the
+            # filtering off the app server and gets real word-based/stemmed
+            # matching instead of a naive substring check. Falls back to the
+            # original fetch-then-filter-in-Python behavior on any error so
+            # this can only make search faster/better when it succeeds, never
+            # break it.
+            try:
+                sb_query = (get_supabase().table("listings")
+                            .select(listing_cols)
+                            .eq("status", "active")
+                            .eq("is_approved", True)
+                            .text_search("title", q, options={"config": "english", "type": "websearch"}))
+                if category:
+                    sb_query = sb_query.eq("category_id", category)
+                sb_query = sb_query.order("sales_count", desc=True)
+                all_listings = sb_query.execute().data or []
+            except Exception as e:
+                current_app.logger.warning(
+                    f"main.search: DB-side text_search failed, falling back to "
+                    f"Python filtering — {e}")
+                all_listings = None
+
+        if all_listings is None:
+            all_listings = db_select(
+                "listings", listing_cols,
+                filters={"status": "active", "is_approved": True},
+                order="-sales_count"
+            )
+            # Filter in Python (fallback path — see try/except above)
+            filtered = []
+            for listing in all_listings:
+                if q and q.lower() not in (listing.get("title") or "").lower():
+                    continue
+                if category and listing.get("category_id") != category:
+                    continue
+                filtered.append(listing)
+            all_listings = filtered
+
         for listing in all_listings:
-            if q and q.lower() not in (listing.get("title") or "").lower():
-                continue
-            if category and listing.get("category_id") != category:
-                continue
             if min_price:
                 try:
                     if float(listing["price"]) < float(min_price):

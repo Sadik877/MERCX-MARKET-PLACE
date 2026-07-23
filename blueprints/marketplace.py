@@ -184,15 +184,29 @@ def listing_detail(slug):
     in_cart         = False
 
     if uid:
-        order = db_select(
-            "order_items", "id",
-            filters={"listing_id": listing["id"]}, single=True
+        # BUG-007 fix: scope the already_bought check to THIS buyer's
+        # completed orders only. The previous code queried order_items by
+        # listing_id alone (no buyer filter) and used single=True, which
+        # silently failed (returning None) for any listing with >1 sale —
+        # leaving already_bought=False even for genuine owners.
+        # Correct approach: fetch this buyer's completed order IDs, then
+        # check whether any of those orders contains this listing.
+        buyer_orders = db_select(
+            "orders", "id",
+            filters={"buyer_id": uid, "status": "completed"}
         )
-        if order:
-            parent = db_select("orders", "buyer_id,status",
-                               filters={"id": order.get("order_id")}, single=True)
-            if parent and parent["buyer_id"] == uid and parent["status"] == "completed":
-                already_bought = True
+        if buyer_orders:
+            buyer_order_ids = {o["id"] for o in buyer_orders}
+            # Check each completed order for this listing; stop at first hit.
+            for oid in buyer_order_ids:
+                hit = db_select(
+                    "order_items", "id",
+                    filters={"order_id": oid, "listing_id": listing["id"]},
+                    single=True
+                )
+                if hit:
+                    already_bought = True
+                    break
 
         wl = db_select("wishlist", "id",
                        filters={"user_id": uid, "listing_id": listing["id"]}, single=True)

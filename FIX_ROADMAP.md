@@ -119,13 +119,18 @@ Update this table as work lands. Do not remove rows.
 | BUG-001 | 1 | **Fixed** — both broken `python_slugify` imports (`seller.py::store_settings`, `dashboard.py::become_seller`) replaced with the existing `make_slug(..., suffix=False)` helper. |
 | BUG-002 | 1 | **Fixed** — all 3 `url_for("seller.wallet")` calls in `escrow.py::request_payout()` corrected to `url_for("seller.withdrawals")`. |
 | BUG-004 | 1 | **Fixed** — `paystack_webhook()` now rejects with 400 if `PAYSTACK_SECRET_KEY` is unconfigured, before computing/comparing the HMAC, matching Stripe/Flutterwave. |
-| BUG-003 | 2 | Not started |
-| BUG-006 | 2 | Not started |
-| BUG-007 | 2 | Not started |
-| BUG-010 | 2 | Not started |
-| BUG-008 | 3 | Not started |
-| BUG-009 | 3 | Not started |
-| BUG-011 | 3 | Not started |
+| BUG-003 | 2 | **Fixed** — added `GET /admin/support/<ticket_id>` (`ticket_detail`) and `POST /admin/support/<ticket_id>/reply` (`reply_ticket`) to `blueprints/admin.py`; added "View" link column to `templates/admin/support.html`. |
+| BUG-006 | 2 | **Fixed** — `.env.example` stale SMTP block replaced with Brevo API section (`BREVO_API_KEY`, `BREVO_TIMEOUT`, `MAIL_DEFAULT_SENDER`); deprecated SMTP vars documented as removed. `FLASK_ENV` default changed from `development` to `production` in `.env.example` to match code default. |
+| BUG-007 | 2 | **Fixed** — `marketplace.py::listing_detail()` `already_bought` check now scoped to the current buyer's completed orders only; no longer uses a naked `listing_id`-only query with `single=True` that silently returns `None` for any listing with >1 sale. |
+| BUG-010 | 2 | **Fixed** — all 9 escrow/payout tables (`escrow_transactions`, `escrow_events`, `escrow_holds`, `disputes`, `dispute_messages`, `payout_requests`, `payout_history`, `webhook_events`, `seller_payout_accounts`) appended to `schema.sql` using `CREATE TABLE IF NOT EXISTS` (safe to re-apply on existing DBs). Schema is now bootstrappable from a single file. |
+| BUG-008 | 3 | **Already Fixed** in this zip — `auth.py::register()` fetches current `referral_count` and increments it atomically; the hardcoded `1` was removed in a prior session. Verified via `grep -n "referral_count" blueprints/auth.py`. |
+| BUG-009 | 3 | **Fixed** — added `@app.errorhandler(401)` to `app.py` returning `errors/403.html` with status 401, for parity with 403/404/429/500. |
+| BUG-011 | 3 | **Fixed** — added `Procfile` (`gunicorn app:app --workers 3 --timeout 60 --log-file - --access-logfile -`) and `render.yaml` (service type, build/start commands, all env var stubs) to repo root. |
+| Item 14 (refund_order atomic RPC) | 3 | **Already Fixed** (found already resolved this session, session 3) — `admin.py::refund_order()` now calls `wallet_credit_idempotent(...)`, the same row-locked, idempotent RPC used by the payment webhooks, keyed on `REFUND-{order_id}`. No remaining manual read-then-write balance path in this function. Not a regression from this session — was already correct in the uploaded zip; the roadmap just hadn't been updated to reflect it. |
+| Item 15 (`db_select` count/`.in_()`) | 3–4 | **COMPLETE (session 3–4).** `db_select()`'s `count_only`/`in_filters` params (session 3) are now in active use across all three blueprints named in this item's original scope — `seller.py`, `admin.py`, and `dashboard.py` (session 4) — see BUG_INVENTORY.md Session 4 sections for full per-function detail. Pattern applied throughout: `count_only=True` replacing `len(db_select(...))` for pure counts; enrichment moved to after pagination and batched via `in_filters` where pagination exists; batched in place where it doesn't (or where a search filter depends on the enriched fields, so enrichment can't be deferred). `main.py` doesn't have this pattern elsewhere (checked during the Phase 3 pass) — its own Item 15-adjacent work was the `search()` DB-side query change, tracked separately as Item 17. |
+| Item 16 (SVG upload hardening) | 3 | **Fixed** (session 3) — `config.py::ALLOWED_IMAGE_EXTENSIONS` no longer includes `svg`. Chose extension removal over sanitize-on-upload or `Content-Disposition` headers because uploaded images are served directly from Supabase Storage public URLs embedded in `<img>` tags with no app-layer proxy in front of them to add headers or run a sanitizer at serve time — removing SVG from the allow-list was the only fix reachable from this codebase without adding new infrastructure. Client-side `accept="image/*"` attributes in upload forms were left as-is (they're just a UX hint; the server-side extension check is the actual enforcement point and is now correct). |
+| Item 17 (wire up GIN search index) | 3 | **Partially addressed** (session 3) — `blueprints/main.py::search()` now queries Postgres via `.text_search()` when `q` is present, instead of fetching every active listing and substring-matching in Python. **Important caveat, do not mark this fully done:** this does *not* actually hit `schema.sql`'s `idx_listings_search` GIN index, because that index is built on a concatenated `title || short_description || description` expression, and Supabase-py's `.text_search()` only accepts a real column name — it was pointed at `title` alone. Real index usage needs a generated/stored `tsvector` column mirroring the index expression, added via a new migration, which needs a live DB to write and verify safely (not available in this sandbox) — left as a clearly-flagged follow-up. The change made today is still a net improvement and is safe: it's wrapped in try/except with a fallback to the exact previous Python-filtering behavior on any error, so it cannot make search worse, only faster/better when the DB call succeeds. `blueprints/marketplace.py::index()` was checked and does **not** need the same change — it only filters by category/price, it has no free-text field.  |
+| BUG-012 | 4 | **Fixed** (session 4) — discovered while starting Phase 4 seller-dashboard work: the real, gateway-aware payout pipeline (`escrow.request_payout` / `seller_payout_accounts` / `payout_requests`, with a full admin review UI already built) was never linked from any template — sellers could only reach the disconnected legacy `dashboard.wallet_withdraw` flow. Fixed by wiring `seller/withdrawals.html`'s request modal to `escrow.request_payout` with a saved-account picker, and updating `seller.withdrawals()` to supply accounts + a unified (legacy + new) history. See BUG_INVENTORY.md BUG-012 for full detail. |
 
 ### Phase 1 verification performed
 
@@ -142,3 +147,104 @@ Update this table as work lands. Do not remove rows.
   seller → create a listing → buy it → confirm receipt → request payout). Recommend running
   that pass in staging before considering Phase 1 fully closed, since static analysis can
   confirm these specific bugs are gone but can't substitute for one real end-to-end run.
+
+---
+
+### Phase 2 + Phase 3 verification performed (session 2)
+
+- `python3 -m py_compile` passed clean on all three modified Python files:
+  `blueprints/admin.py`, `blueprints/marketplace.py`, `app.py`.
+- Full `url_for()` cross-reference re-sweep run against the correct endpoint registry
+  (all 7 blueprints, all decorated `def` functions): **zero dangling references** remain.
+  The sweep now correctly identifies `admin.ticket_detail` and `admin.reply_ticket` as
+  present (they were just added). Complete list of registered endpoints confirmed accurate.
+- `schema.sql` now contains all 9 escrow/payout tables. `CREATE TABLE IF NOT EXISTS` makes
+  the appended section idempotent — safe to run against a DB that already has migrations 002/003.
+- BUG-008 confirmed already fixed (not a regression from this session).
+- BUG-009 confirmed: `errorhandler(401)` added. **Note:** the 401 handler reuses
+  `errors/403.html` since the theme conveys "you are not permitted here" — a dedicated
+  `errors/401.html` can be added in Phase 4 for a more precise UX.
+- BUG-011 confirmed: `Procfile` and `render.yaml` created with reproducible Gunicorn config.
+- `.env.example` `FLASK_ENV` corrected to `production` to match the Phase 1 code default.
+- **Not yet done** (still requires a live Supabase-backed environment):
+  - End-to-end walkthrough of Phase 1 items (noted in Phase 1 verification as still pending).
+  - Admin support-ticket live test (Phase 2 / BUG-003): click "View" on a ticket, send a
+    reply, change status — verify round-trip works and message thread renders.
+  - Verify `already_bought` indicator on listing page for a multi-buyer listing
+    (Phase 2 / BUG-007): requires placing an order as two separate buyer accounts.
+
+---
+
+## Session 3 — Incremental Update
+
+**Continued from:** the "NEXT RECOMMENDED STEP" section below as it stood at the end of
+session 2 — Phase 3 items 14–17 (all previously unstarted/non-blocking, listed as the
+next recommended actions).
+
+**Verification performed first (re-confirming session 2's claims, not re-diagnosing):**
+- `python3 -m py_compile` clean on every `.py` file in `app.py`, `config.py`, `blueprints/`,
+  `utils/` — confirms BUG-001 through BUG-011 fixes are actually present in this zip, not
+  just described as fixed.
+- Full `url_for()` vs. registered-endpoint mechanical sweep re-run fresh (123 endpoints,
+  independent implementation from session 2's): **zero dangling references.** Confirms
+  Phase 2 item 10 (broken-link re-sweep) is still clean after this session's edits too.
+- `node --check` on the one JS file in the repo (`static/js/main.js`): no syntax errors.
+- Spot-checked `blueprints/api.py::paystack_webhook()`, `app.py` error handlers, `config.py`
+  FLASK_ENV default, and `admin.py::refund_order()` directly against the source (not just
+  trusting the status table) — all matched what BUG_INVENTORY.md/FIX_ROADMAP.md claimed.
+
+**Work completed this session:** Phase 3 items 14 (confirmed already fixed, not a
+regression), 15 (fixed — additive), 16 (fixed), 17 (partially addressed, capped and
+explained above). See the Status Tracking table above for full detail per item.
+
+**Files changed this session:**
+- `utils/supabase_client.py` — `db_select()` gained `count_only` and `in_filters` params.
+- `config.py` — removed `svg` from `ALLOWED_IMAGE_EXTENSIONS`.
+- `blueprints/main.py` — `search()` now tries DB-side `.text_search()` before falling back
+  to the original Python-filter path; added `get_supabase`/`current_app` imports.
+
+**No new numbered bugs found.** This session's own edits were compile-checked and swept
+for dangling routes/imports; no new BUG-0xx entries were needed in `BUG_INVENTORY.md`.
+
+---
+
+## Session 4 — Phase 4: Seller Dashboard / Payouts UI (COMPLETE)
+
+User directed continuation into Phase 4, choosing seller dashboard / payouts UI as the
+starting area. Before any visual work, functional inspection surfaced **BUG-012** (real
+payout pipeline never linked from any template — see BUG_INVENTORY.md). User chose to fix
+it first, then redesign. Both done — see BUG-012 row above and the Session 4 sections of
+BUG_INVENTORY.md for full detail.
+
+Also used this area as the vehicle to finish Item 15 (N+1/count-query cleanup) across all
+three related blueprints (`seller.py`, `admin.py`, `dashboard.py`) — see rows above.
+
+Every template in `templates/seller/` has now been either fixed+redesigned
+(`withdrawals.html`, `payout_account.html` cross-link) or explicitly checked and confirmed
+to already meet the design bar (`dashboard.html`, `analytics.html`, `inventory.html`,
+`orders.html`, `reviews.html`, `create_listing.html`, `edit_listing.html`,
+`store_settings.html`) — see BUG_INVENTORY.md's "Seller dashboard / payouts UI area closed
+out" note for the reasoning on why the latter group didn't get cosmetic changes.
+
+**This Phase 4 area is done.** Next area is open.
+
+## NEXT RECOMMENDED STEP (for next session)
+
+1. **Live staging verification pass** — still the single biggest gap, unchanged since
+   session 3. Now also specifically needs: submitting a real payout request through the new
+   `seller/withdrawals.html` modal against a real saved payout account, and confirming it
+   shows correctly in `admin/payouts.html` for approval (BUG-012's fix has only been
+   verified by template rendering + compile checks, not a live round-trip). Also worth
+   spot-checking the count_only()/in_filters() batching changes against real Supabase
+   responses, since count="exact" mode and .in_() haven't been exercised against a live
+   instance in this sandbox either.
+2. **Pick the next Phase 4 area** — user has not yet indicated priority. Candidates per the
+   original list: admin panel visual polish, buyer experience (product pages, purchases,
+   downloads), public marketplace site (homepage, listing/search pages), mobile
+   responsiveness pass across everything.
+3. **Item 17 follow-through:** add a migration creating a generated/stored `tsvector`
+   column matching `idx_listings_search`'s expression (`title || short_description ||
+   description`), and point `.text_search()` at that column instead of bare `title`, so the
+   existing GIN index is actually used. Needs a live DB to write and verify.
+4. **Item 15 — COMPLETE.** No further follow-through needed unless a future session finds
+   new N+1s introduced by other work.

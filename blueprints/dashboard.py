@@ -48,10 +48,11 @@ def index():
     total_purchases  = sum(1 for o in all_buyer_orders if o["status"] == "completed")
 
     # Unread notifications count
-    all_notifs = db_select("notifications", "id", filters={"user_id": uid, "is_read": False})
+    unread_notif_count = db_select("notifications", "id",
+                                   filters={"user_id": uid, "is_read": False}, count_only=True)
 
     # Wishlist count
-    wl = db_select("wishlist", "id", filters={"user_id": uid})
+    wishlist_count = db_select("wishlist", "id", filters={"user_id": uid}, count_only=True)
 
     # Wallet stats
     tx = db_select("wallet_transactions", "type,amount,status",
@@ -60,38 +61,47 @@ def index():
     total_earned  = sum(float(t["amount"]) for t in tx if t["type"] == "sale")
     total_deposit = sum(float(t["amount"]) for t in tx if t["type"] == "deposit")
 
-    # Recent messages (for activity tab)
+    # Recent messages (for activity tab) — batched other_user lookup
     convos_1 = db_select("conversations", "*", filters={"participant_1": uid}, order="-last_message_at")
     convos_2 = db_select("conversations", "*", filters={"participant_2": uid}, order="-last_message_at")
     recent_messages = (convos_1 + convos_2)
     recent_messages.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
     recent_messages = recent_messages[:6]
-    for c in recent_messages:
-        other_id = c["participant_2"] if c["participant_1"] == uid else c["participant_1"]
-        other    = db_select("users", "id,username", filters={"id": other_id}, single=True)
-        c["other_user"] = other
+    if recent_messages:
+        other_ids = list({
+            (c["participant_2"] if c["participant_1"] == uid else c["participant_1"])
+            for c in recent_messages
+        })
+        others = db_select("users", "id,username", in_filters={"id": other_ids}) if other_ids else []
+        other_map = {o["id"]: o for o in others}
+        for c in recent_messages:
+            other_id = c["participant_2"] if c["participant_1"] == uid else c["participant_1"]
+            c["other_user"] = other_map.get(other_id)
 
     # Recent notifications (for activity tab)
     recent_notifications = db_select("notifications", "*", filters={"user_id": uid},
                                      order="-created_at", limit=6)
 
-    # Recent wishlist adds (for activity tab)
+    # Recent wishlist adds (for activity tab) — batched listing lookup
     recent_wishlist_rows = db_select("wishlist", "*", filters={"user_id": uid},
                                      order="-created_at", limit=6)
     recent_wishlist = []
-    for row in recent_wishlist_rows:
-        listing = db_select("listings", "id,title,slug,price,preview_images",
-                            filters={"id": row["listing_id"]}, single=True)
-        if listing:
-            recent_wishlist.append(listing)
+    if recent_wishlist_rows:
+        wl_listing_ids = list({row["listing_id"] for row in recent_wishlist_rows if row.get("listing_id")})
+        wl_listings = db_select("listings", "id,title,slug,price,preview_images",
+                                in_filters={"id": wl_listing_ids}) if wl_listing_ids else []
+        wl_listing_map = {l["id"]: l for l in wl_listings}
+        # preserve recency order from recent_wishlist_rows
+        recent_wishlist = [wl_listing_map[row["listing_id"]] for row in recent_wishlist_rows
+                           if row.get("listing_id") in wl_listing_map]
 
     return render_template("dashboard/index.html",
         user=user, profile=prof,
         purchases=purchases, sales=sales,
         total_orders=total_orders,
         total_purchases=total_purchases,
-        unread_notifications=len(all_notifs),
-        wishlist_count=len(wl),
+        unread_notifications=unread_notif_count,
+        wishlist_count=wishlist_count,
         total_spent=total_spent,
         total_earned=total_earned,
         total_deposit=total_deposit,
@@ -264,20 +274,30 @@ def purchases():
     paginated = all_orders[start: start + per_page]
     pages     = max(1, -(-total // per_page))
 
-    # Enrich with order items + escrow timeline. escrow_transactions
-    # is 1:1 with orders (UNIQUE(order_id) in migrations/002), so a
-    # single lookup per order is enough — no N+1 across escrow_events.
-    for order in paginated:
-        order["items"]  = db_select("order_items", "*", filters={"order_id": order["id"]})
-        order["escrow"] = db_select("escrow_transactions", "*",
-                                    filters={"order_id": order["id"]}, single=True)
-        if order["escrow"]:
-            dispute = db_select("disputes", "id,status",
-                                filters={"escrow_transaction_id": order["escrow"]["id"]},
-                                order="-created_at", limit=1)
-            order["dispute"] = dispute[0] if dispute else None
-        else:
-            order["dispute"] = None
+    # Enrich with order items + escrow timeline, batched. escrow_transactions
+    # is 1:1 with orders (UNIQUE(order_id) in migrations/002).
+    if paginated:
+        pg_order_ids = [o["id"] for o in paginated]
+
+        items_all = db_select("order_items", "*", in_filters={"order_id": pg_order_ids})
+        items_by_order = {}
+        for it in items_all:
+            items_by_order.setdefault(it["order_id"], []).append(it)
+
+        escrows_all = db_select("escrow_transactions", "*", in_filters={"order_id": pg_order_ids})
+        escrow_by_order = {e["order_id"]: e for e in escrows_all}
+
+        escrow_ids = [e["id"] for e in escrows_all]
+        disputes_all = db_select("disputes", "id,status,escrow_transaction_id,created_at",
+                                 in_filters={"escrow_transaction_id": escrow_ids}, order="-created_at") if escrow_ids else []
+        dispute_by_escrow = {}
+        for d in disputes_all:
+            dispute_by_escrow.setdefault(d["escrow_transaction_id"], d)  # first seen = latest, ordered desc
+
+        for order in paginated:
+            order["items"]  = items_by_order.get(order["id"], [])
+            order["escrow"] = escrow_by_order.get(order["id"])
+            order["dispute"] = dispute_by_escrow.get(order["escrow"]["id"]) if order["escrow"] else None
 
     return render_template("dashboard/purchases.html",
         orders=paginated, search=search, page=page, pages=pages, total=total)
@@ -340,19 +360,33 @@ def messages():
                         filters={"participant_2": uid}, order="-last_message_at")
     convos.sort(key=lambda x: x.get("last_message_at") or "", reverse=True)
 
-    # Enrich with other participant info
-    for c in convos:
-        other_id = c["participant_2"] if c["participant_1"] == uid else c["participant_1"]
-        other    = db_select("users", "id,username", filters={"id": other_id}, single=True)
-        op       = db_select("user_profiles", "avatar_url", filters={"user_id": other_id}, single=True)
-        c["other_user"]   = other
-        c["other_avatar"] = op.get("avatar_url") if op else None
-        c["unread"]       = (c["unread_count_1"] if c["participant_1"] == uid
-                             else c["unread_count_2"])
-        # Last message preview text (for the conversation list)
-        last_msgs = db_select("messages", "content,sender_id",
-                              filters={"conversation_id": c["id"]}, order="-created_at", limit=1)
-        c["last_preview"] = (last_msgs[0]["content"] if last_msgs else "")
+    # Enrich with other participant info — batched (previously 3 queries
+    # per conversation: other user, avatar, last-message preview).
+    if convos:
+        other_ids = list({
+            (c["participant_2"] if c["participant_1"] == uid else c["participant_1"])
+            for c in convos
+        })
+        others = db_select("users", "id,username", in_filters={"id": other_ids}) if other_ids else []
+        other_map = {o["id"]: o for o in others}
+
+        avatars = db_select("user_profiles", "user_id,avatar_url", in_filters={"user_id": other_ids}) if other_ids else []
+        avatar_map = {a["user_id"]: a.get("avatar_url") for a in avatars}
+
+        convo_ids = [c["id"] for c in convos]
+        all_last_msgs = db_select("messages", "content,sender_id,conversation_id",
+                                  in_filters={"conversation_id": convo_ids}, order="-created_at")
+        preview_map = {}
+        for m in all_last_msgs:
+            preview_map.setdefault(m["conversation_id"], m["content"])  # first seen = latest, ordered desc
+
+        for c in convos:
+            other_id = c["participant_2"] if c["participant_1"] == uid else c["participant_1"]
+            c["other_user"]   = other_map.get(other_id)
+            c["other_avatar"] = avatar_map.get(other_id)
+            c["unread"]       = (c["unread_count_1"] if c["participant_1"] == uid
+                                 else c["unread_count_2"])
+            c["last_preview"] = preview_map.get(c["id"], "")
 
     active_id = request.args.get("conversation")
     chat      = []
@@ -458,13 +492,18 @@ def wishlist():
     uid   = session["user_id"]
     items = db_select("wishlist", "*", filters={"user_id": uid}, order="-created_at")
     listings = []
-    for item in items:
-        listing = db_select("listings",
-                            "id,title,slug,price,compare_price,rating,preview_images,status,is_approved",
-                            filters={"id": item["listing_id"]}, single=True)
-        if listing:
-            listing["wishlist_id"] = item["id"]
-            listings.append(listing)
+    if items:
+        listing_ids = list({item["listing_id"] for item in items if item.get("listing_id")})
+        found = db_select("listings",
+                          "id,title,slug,price,compare_price,rating,preview_images,status,is_approved",
+                          in_filters={"id": listing_ids}) if listing_ids else []
+        found_map = {l["id"]: l for l in found}
+        for item in items:
+            listing = found_map.get(item["listing_id"])
+            if listing:
+                listing = dict(listing)  # avoid mutating the shared map entry if listing_ids repeat
+                listing["wishlist_id"] = item["id"]
+                listings.append(listing)
     return render_template("dashboard/wishlist.html", listings=listings)
 
 
@@ -482,18 +521,24 @@ def wishlist_add_all_to_cart():
     room_left     = max_cart - len(existing_cart)
 
     added = 0
-    for item in items:
-        if room_left <= 0:
-            break
-        if item["listing_id"] in existing_ids:
-            continue
-        listing = db_select("listings", "id,status,is_approved",
-                            filters={"id": item["listing_id"]}, single=True)
-        if not listing or listing["status"] != "active" or not listing["is_approved"]:
-            continue
-        db_insert("cart_items", {"user_id": uid, "listing_id": item["listing_id"]})
-        added += 1
-        room_left -= 1
+    if items:
+        candidate_ids = list({item["listing_id"] for item in items
+                              if item.get("listing_id") and item["listing_id"] not in existing_ids})
+        valid_listings = db_select("listings", "id,status,is_approved",
+                                   in_filters={"id": candidate_ids}) if candidate_ids else []
+        valid_map = {l["id"]: l for l in valid_listings}
+
+        for item in items:
+            if room_left <= 0:
+                break
+            if item["listing_id"] in existing_ids:
+                continue
+            listing = valid_map.get(item["listing_id"])
+            if not listing or listing["status"] != "active" or not listing["is_approved"]:
+                continue
+            db_insert("cart_items", {"user_id": uid, "listing_id": item["listing_id"]})
+            added += 1
+            room_left -= 1
 
     if added:
         flash(f"Added {added} item(s) to your cart.", "success")
@@ -614,11 +659,11 @@ def referrals():
     if ref_code:
         profiles = db_select("user_profiles", "user_id,created_at",
                              filters={"referred_by": uid})
-        for p in profiles:
-            u = db_select("users", "id,username,created_at",
-                          filters={"id": p["user_id"]}, single=True)
-            if u:
-                referred_users.append(u)
+        if profiles:
+            ref_user_ids = list({p["user_id"] for p in profiles if p.get("user_id")})
+            found = db_select("users", "id,username,created_at",
+                              in_filters={"id": ref_user_ids}) if ref_user_ids else []
+            referred_users = found
 
     ref_tx = db_select("wallet_transactions", "amount,created_at",
                        filters={"user_id": uid, "type": "referral", "status": "completed"})

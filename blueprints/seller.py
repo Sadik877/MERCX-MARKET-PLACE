@@ -77,13 +77,13 @@ def dashboard():
     conversion_rate = round((total_sales / total_views * 100), 2) if total_views > 0 else 0.0
 
     # Total downloads across all of this seller's sold order items.
+    # (Previously looped one db_select per order — now batched via the
+    # in_filters support added to db_select() in the Phase 3 pass.)
     seller_order_ids = [o["id"] for o in orders_all]
     total_downloads = 0
     if seller_order_ids:
-        # db_select doesn't support "IN" filtering, so aggregate per-order.
-        for oid in seller_order_ids:
-            items = db_select("order_items", "download_count", filters={"order_id": oid})
-            total_downloads += sum(int(i.get("download_count") or 0) for i in items)
+        items = db_select("order_items", "download_count", in_filters={"order_id": seller_order_ids})
+        total_downloads = sum(int(i.get("download_count") or 0) for i in items)
 
     # Monthly revenue (last 6 months)
     monthly = {}
@@ -103,9 +103,12 @@ def dashboard():
     # Recent reviews (across all of the seller's listings)
     recent_reviews = db_select("reviews", "*", filters={"seller_id": sid},
                                order="-created_at", limit=6)
-    for r in recent_reviews:
-        buyer = db_select("users", "id,username", filters={"id": r["buyer_id"]}, single=True)
-        r["buyer"] = buyer
+    if recent_reviews:
+        rbuyer_ids = list({r["buyer_id"] for r in recent_reviews if r.get("buyer_id")})
+        rbuyers = db_select("users", "id,username", in_filters={"id": rbuyer_ids}) if rbuyer_ids else []
+        rbuyer_map = {b["id"]: b for b in rbuyers}
+        for r in recent_reviews:
+            r["buyer"] = rbuyer_map.get(r["buyer_id"])
 
     # Recent messages (conversations involving this seller)
     convos_1 = db_select("conversations", "*", filters={"participant_1": sid}, order="-last_message_at")
@@ -113,15 +116,36 @@ def dashboard():
     recent_messages = (convos_1 + convos_2)
     recent_messages.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
     recent_messages = recent_messages[:6]
-    for c in recent_messages:
-        other_id = c["participant_2"] if c["participant_1"] == sid else c["participant_1"]
-        other    = db_select("users", "id,username", filters={"id": other_id}, single=True)
-        c["other_user"] = other
+    if recent_messages:
+        other_ids = list({
+            (c["participant_2"] if c["participant_1"] == sid else c["participant_1"])
+            for c in recent_messages
+        })
+        others = db_select("users", "id,username", in_filters={"id": other_ids}) if other_ids else []
+        other_map = {o["id"]: o for o in others}
+        for c in recent_messages:
+            other_id = c["participant_2"] if c["participant_1"] == sid else c["participant_1"]
+            c["other_user"] = other_map.get(other_id)
 
-    # Recent withdrawals
-    recent_withdrawals = db_select("wallet_transactions", "*",
-                                   filters={"user_id": sid, "type": "withdrawal"},
-                                   order="-created_at", limit=6)
+    # Recent withdrawals (BUG-012 follow-through: merge the real payout_requests
+    # pipeline with legacy wallet_transactions withdrawals so payouts submitted
+    # through the now-wired escrow flow actually show up in this activity feed,
+    # not just old legacy-path withdrawals).
+    recent_wallet_wd = db_select("wallet_transactions", "*",
+                                 filters={"user_id": sid, "type": "withdrawal"},
+                                 order="-created_at", limit=6)
+    recent_payouts = db_select("payout_requests", "*",
+                               filters={"seller_id": sid}, order="-requested_at", limit=6)
+    payout_status_map = {"approved": "completed", "pending": "pending", "rejected": "failed"}
+    recent_withdrawals = (
+        [{"amount": p["amount"],
+          "status": payout_status_map.get(p["status"], p["status"]),
+          "created_at": p.get("requested_at") or ""} for p in recent_payouts]
+        + [{"amount": t["amount"], "status": t["status"],
+            "created_at": t.get("created_at") or ""} for t in recent_wallet_wd]
+    )
+    recent_withdrawals.sort(key=lambda w: w["created_at"], reverse=True)
+    recent_withdrawals = recent_withdrawals[:6]
 
     # Recent notifications
     recent_notifications = db_select("notifications", "*", filters={"user_id": sid},
@@ -551,17 +575,31 @@ def orders():
         filters["status"] = status
 
     all_orders = db_select("orders", "*", filters=filters, order="-created_at")
-    for o in all_orders:
-        buyer = db_select("users", "id,username,email",
-                          filters={"id": o["buyer_id"]}, single=True)
-        o["buyer"] = buyer
-        o["items"] = db_select("order_items", "*", filters={"order_id": o["id"]})
 
     per_page  = 20
     total     = len(all_orders)
     start     = (page - 1) * per_page
     paginated = all_orders[start: start + per_page]
     pages     = max(1, -(-total // per_page))
+
+    # Enrich only the page actually being rendered (previously enriched
+    # every matching order — one buyer query + one order_items query per
+    # order — before pagination even sliced it down). Batched via
+    # in_filters (Phase 3) instead of a per-order loop.
+    if paginated:
+        buyer_ids = list({o["buyer_id"] for o in paginated if o.get("buyer_id")})
+        buyers    = db_select("users", "id,username,email", in_filters={"id": buyer_ids}) if buyer_ids else []
+        buyer_map = {b["id"]: b for b in buyers}
+
+        order_ids     = [o["id"] for o in paginated]
+        items_all     = db_select("order_items", "*", in_filters={"order_id": order_ids})
+        items_by_order = {}
+        for it in items_all:
+            items_by_order.setdefault(it["order_id"], []).append(it)
+
+        for o in paginated:
+            o["buyer"] = buyer_map.get(o["buyer_id"])
+            o["items"] = items_by_order.get(o["id"], [])
 
     return render_template("seller/orders.html",
         orders=paginated, status=status, page=page, pages=pages, total=total)
@@ -709,11 +747,14 @@ def analytics():
     total_sales = len(completed)
     conversion  = round((total_sales / total_views * 100), 2) if total_views > 0 else 0
 
-    # Total downloads (aggregate — see dashboard() for the same derivation)
+    # Total downloads (aggregate — batched via in_filters, see dashboard()
+    # for the same derivation and the Phase 3 note on why this changed
+    # from a per-order loop).
     total_downloads = 0
-    for o in orders_all:
-        items = db_select("order_items", "download_count", filters={"order_id": o["id"]})
-        total_downloads += sum(int(i.get("download_count") or 0) for i in items)
+    order_ids = [o["id"] for o in orders_all]
+    if order_ids:
+        items = db_select("order_items", "download_count", in_filters={"order_id": order_ids})
+        total_downloads = sum(int(i.get("download_count") or 0) for i in items)
 
     # NOTE (schema TODO): "Visitors" (unique daily page-view counts) cannot
     # be charted over time with the current schema. `listings.views` is a
@@ -809,13 +850,6 @@ def reviews():
         filters["rating"] = int(rating_filter)
 
     all_reviews = db_select("reviews", "*", filters=filters, order="-created_at")
-    for r in all_reviews:
-        buyer = db_select("users", "id,username", filters={"id": r["buyer_id"]}, single=True)
-        bprof = db_select("user_profiles", "avatar_url", filters={"user_id": r["buyer_id"]}, single=True)
-        listing = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
-        r["buyer"]   = buyer
-        r["avatar"]  = bprof.get("avatar_url") if bprof else None
-        r["listing"] = listing
 
     # Rating breakdown across ALL of this seller's reviews (unfiltered)
     unfiltered = db_select("reviews", "rating", filters={"seller_id": sid})
@@ -828,6 +862,27 @@ def reviews():
     start     = (page - 1) * per_page
     paginated = all_reviews[start: start + per_page]
     pages     = max(1, -(-total // per_page))
+
+    # Enrich only the page actually being rendered (previously ran 3
+    # queries — buyer, buyer avatar, listing — per *every* matching
+    # review before pagination sliced it down). Batched via in_filters.
+    if paginated:
+        buyer_ids   = list({r["buyer_id"] for r in paginated if r.get("buyer_id")})
+        listing_ids = list({r["listing_id"] for r in paginated if r.get("listing_id")})
+
+        buyers = db_select("users", "id,username", in_filters={"id": buyer_ids}) if buyer_ids else []
+        buyer_map = {b["id"]: b for b in buyers}
+
+        bprofs = db_select("user_profiles", "user_id,avatar_url", in_filters={"user_id": buyer_ids}) if buyer_ids else []
+        avatar_map = {p["user_id"]: p.get("avatar_url") for p in bprofs}
+
+        listings = db_select("listings", "id,title,slug", in_filters={"id": listing_ids}) if listing_ids else []
+        listing_map = {l["id"]: l for l in listings}
+
+        for r in paginated:
+            r["buyer"]   = buyer_map.get(r["buyer_id"])
+            r["avatar"]  = avatar_map.get(r["buyer_id"])
+            r["listing"] = listing_map.get(r["listing_id"])
 
     return render_template("seller/reviews.html",
         reviews=paginated, rating_filter=rating_filter,
@@ -851,6 +906,37 @@ def withdrawals():
     completed_tx = [t for t in all_tx if t["status"] == "completed"]
     cancelled_tx = [t for t in all_tx if t["status"] == "cancelled"]
 
+    # BUG-012: saved payout accounts + real payout_requests, so the
+    # "Request Withdrawal" action on this page can actually submit
+    # against escrow.request_payout (POST /seller/payouts/request)
+    # instead of the disconnected legacy dashboard.wallet_withdraw path.
+    accounts = db_select("seller_payout_accounts", "*",
+                         filters={"seller_id": sid}, order="-is_default")
+    payout_requests = db_select("payout_requests", "*",
+                                filters={"seller_id": sid}, order="-requested_at")
+    pending_payouts = [p for p in payout_requests if p["status"] == "pending"]
+
+    # Unified history: merge the new payout_requests (the real,
+    # gateway-aware pipeline going forward) with any pre-existing legacy
+    # wallet_transactions withdrawal rows (so nothing already on a
+    # seller's history disappears just because the submission path
+    # changed), sorted newest-first.
+    payout_status_map = {"approved": "completed", "pending": "pending", "rejected": "failed"}
+    history = [{
+        "amount":    p["amount"],
+        "method":    (p.get("destination") or {}).get("method", p.get("method", "")),
+        "reference": p.get("reference", ""),
+        "date":      (p.get("requested_at") or "")[:10],
+        "status":    payout_status_map.get(p["status"], p["status"]),
+    } for p in payout_requests] + [{
+        "amount":    t["amount"],
+        "method":    t.get("payment_method", ""),
+        "reference": t.get("reference", ""),
+        "date":      (t.get("created_at") or "")[:10],
+        "status":    t["status"],
+    } for t in all_tx]
+    history.sort(key=lambda h: h["date"], reverse=True)
+
     # Pending balance: earnings not yet released (see dashboard() for derivation)
     orders_pending = db_select("orders", "seller_earnings,status",
                                filters={"seller_id": sid})
@@ -859,7 +945,8 @@ def withdrawals():
         for o in orders_pending if o["status"] in ("pending", "processing")
     )
 
-    total_withdrawn = sum(float(t["amount"]) for t in completed_tx)
+    total_withdrawn = sum(float(t["amount"]) for t in completed_tx) + \
+                       sum(float(p["amount"]) for p in payout_requests if p["status"] == "approved")
 
     cfg = current_app.config
     return render_template("seller/withdrawals.html",
@@ -869,6 +956,7 @@ def withdrawals():
         total_withdrawn=total_withdrawn,
         all_tx=all_tx, pending_tx=pending_tx,
         completed_tx=completed_tx, cancelled_tx=cancelled_tx,
+        accounts=accounts, pending_payouts=pending_payouts, history=history,
         min_withdrawal=cfg.get("MIN_WITHDRAWAL", 10),
         max_withdrawal=cfg.get("MAX_WITHDRAWAL", 10000),
     )

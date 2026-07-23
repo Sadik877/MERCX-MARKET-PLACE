@@ -16,15 +16,16 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.route("/")
 @admin_required
 def dashboard():
-    # Platform stats
-    total_users     = len(db_select("users", "id"))
-    total_sellers   = len(db_select("users", "id", filters={"role": "seller"}))
-    total_listings  = len(db_select("listings", "id", filters={"status": "active", "is_approved": True}))
-    pending_ap      = len(db_select("listings", "id", filters={"status": "pending"}))
-    total_orders    = len(db_select("orders", "id"))
-    completed_orders = len(db_select("orders", "id", filters={"status": "completed"}))
-    pending_reports = len(db_select("listing_reports", "id", filters={"status": "pending"}))
-    open_tickets    = len(db_select("support_tickets", "id", filters={"status": "open"}))
+    # Platform stats — count_only avoids transferring full row sets just to
+    # discard them for a number (Item 15 follow-through).
+    total_users     = db_select("users", "id", count_only=True)
+    total_sellers   = db_select("users", "id", filters={"role": "seller"}, count_only=True)
+    total_listings  = db_select("listings", "id", filters={"status": "active", "is_approved": True}, count_only=True)
+    pending_ap      = db_select("listings", "id", filters={"status": "pending"}, count_only=True)
+    total_orders    = db_select("orders", "id", count_only=True)
+    completed_orders = db_select("orders", "id", filters={"status": "completed"}, count_only=True)
+    pending_reports = db_select("listing_reports", "id", filters={"status": "pending"}, count_only=True)
+    open_tickets    = db_select("support_tickets", "id", filters={"status": "open"}, count_only=True)
 
     # Revenue
     completed = db_select("orders", "total,platform_fee,created_at",
@@ -46,35 +47,45 @@ def dashboard():
                                order="-created_at", limit=6)
     recent_orders  = db_select("orders", "id,order_number,status,total,created_at",
                                order="-created_at", limit=6)
-    pending_deposits = db_select("wallet_transactions", "*",
-                                 filters={"type": "deposit", "status": "pending"})
-    pending_withdrawals = db_select("wallet_transactions", "*",
-                                    filters={"type": "withdrawal", "status": "pending"})
+    pending_deposits = db_select("wallet_transactions", "id",
+                                 filters={"type": "deposit", "status": "pending"}, count_only=True)
+    pending_withdrawals = db_select("wallet_transactions", "id",
+                                    filters={"type": "withdrawal", "status": "pending"}, count_only=True)
 
-    # Recent pending listings (for activity tab)
+    # Recent pending listings (for activity tab) — batched seller lookup
     recent_pending_listings = db_select(
         "listings", "id,title,seller_id,price,created_at",
         filters={"status": "pending"}, order="-created_at", limit=6
     )
-    for l in recent_pending_listings:
-        seller = db_select("users", "id,username", filters={"id": l["seller_id"]}, single=True)
-        l["seller"] = seller
+    if recent_pending_listings:
+        seller_ids = list({l["seller_id"] for l in recent_pending_listings if l.get("seller_id")})
+        sellers = db_select("users", "id,username", in_filters={"id": seller_ids}) if seller_ids else []
+        seller_map = {s["id"]: s for s in sellers}
+        for l in recent_pending_listings:
+            l["seller"] = seller_map.get(l["seller_id"])
 
-    # Recent reports (for activity tab)
+    # Recent reports (for activity tab) — batched listing lookup
     recent_reports = db_select("listing_reports", "*", filters={"status": "pending"},
                                order="-created_at", limit=6)
-    for r in recent_reports:
-        listing = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
-        r["listing"] = listing
+    if recent_reports:
+        rl_ids = list({r["listing_id"] for r in recent_reports if r.get("listing_id")})
+        rlistings = db_select("listings", "id,title,slug", in_filters={"id": rl_ids}) if rl_ids else []
+        rlisting_map = {l["id"]: l for l in rlistings}
+        for r in recent_reports:
+            r["listing"] = rlisting_map.get(r["listing_id"])
 
-    # Recent support tickets (for activity tab)
+    # Recent support tickets (for activity tab) — batched user lookup
     recent_tickets = db_select("support_tickets", "*", filters={"status": "open"},
                                order="-created_at", limit=6)
-    for t in recent_tickets:
-        u = db_select("users", "id,username", filters={"id": t["user_id"]}, single=True)
-        t["user"] = u
+    if recent_tickets:
+        tu_ids = list({t["user_id"] for t in recent_tickets if t.get("user_id")})
+        tusers = db_select("users", "id,username", in_filters={"id": tu_ids}) if tu_ids else []
+        tuser_map = {u["id"]: u for u in tusers}
+        for t in recent_tickets:
+            t["user"] = tuser_map.get(t["user_id"])
 
-    # User registration trend
+    # User registration trend (needs actual rows, not just a count, to bucket
+    # by month — count_only doesn't apply here)
     user_monthly = {}
     for u in db_select("users", "created_at"):
         m = (u.get("created_at") or "")[:7]
@@ -103,8 +114,8 @@ def dashboard():
         recent_pending_listings=recent_pending_listings,
         recent_reports=recent_reports,
         recent_tickets=recent_tickets,
-        pending_deposits=len(pending_deposits),
-        pending_withdrawals=len(pending_withdrawals),
+        pending_deposits=pending_deposits,
+        pending_withdrawals=pending_withdrawals,
     )
 
 
@@ -227,16 +238,20 @@ def listings():
         all_listings = [l for l in all_listings
                         if search in (l.get("title") or "").lower()]
 
-    # Enrich with seller info
-    for l in all_listings:
-        seller = db_select("users", "id,username", filters={"id": l["seller_id"]}, single=True)
-        l["seller"] = seller
-
     per_page  = 25
     total     = len(all_listings)
     start     = (page - 1) * per_page
     paginated = all_listings[start: start + per_page]
     pages     = max(1, -(-total // per_page))
+
+    # Enrich seller info only for the page being rendered, batched
+    # (previously ran one query per matching listing before pagination).
+    if paginated:
+        seller_ids = list({l["seller_id"] for l in paginated if l.get("seller_id")})
+        sellers = db_select("users", "id,username", in_filters={"id": seller_ids}) if seller_ids else []
+        seller_map = {s["id"]: s for s in sellers}
+        for l in paginated:
+            l["seller"] = seller_map.get(l["seller_id"])
 
     return render_template("admin/listings.html",
         listings=paginated, status=status, search=search,
@@ -410,17 +425,22 @@ def orders():
         all_orders = [o for o in all_orders
                       if search in (o.get("order_number") or "").lower()]
 
-    for o in all_orders:
-        buyer  = db_select("users", "id,username", filters={"id": o["buyer_id"]}, single=True)
-        seller = db_select("users", "id,username", filters={"id": o["seller_id"]}, single=True)
-        o["buyer"]  = buyer
-        o["seller"] = seller
-
     per_page  = 25
     total     = len(all_orders)
     start     = (page - 1) * per_page
     paginated = all_orders[start: start + per_page]
     pages     = max(1, -(-total // per_page))
+
+    # Enrich only the page being rendered, batched (previously two
+    # queries — buyer, seller — per matching order before pagination).
+    if paginated:
+        user_ids = list({o["buyer_id"] for o in paginated if o.get("buyer_id")} |
+                        {o["seller_id"] for o in paginated if o.get("seller_id")})
+        users = db_select("users", "id,username", in_filters={"id": user_ids}) if user_ids else []
+        user_map = {u["id"]: u for u in users}
+        for o in paginated:
+            o["buyer"]  = user_map.get(o["buyer_id"])
+            o["seller"] = user_map.get(o["seller_id"])
 
     return render_template("admin/orders.html",
         orders=paginated, status=status, search=search,
@@ -513,15 +533,19 @@ def wallet():
         filters["status"] = status_f
 
     txs = db_select("wallet_transactions", "*", filters=filters, order="-created_at")
-    for tx in txs:
-        u = db_select("users", "id,username,email", filters={"id": tx["user_id"]}, single=True)
-        tx["user"] = u
 
     per_page  = 25
     total     = len(txs)
     start     = (page - 1) * per_page
     paginated = txs[start: start + per_page]
     pages     = max(1, -(-total // per_page))
+
+    if paginated:
+        user_ids = list({tx["user_id"] for tx in paginated if tx.get("user_id")})
+        users = db_select("users", "id,username,email", in_filters={"id": user_ids}) if user_ids else []
+        user_map = {u["id"]: u for u in users}
+        for tx in paginated:
+            tx["user"] = user_map.get(tx["user_id"])
 
     return render_template("admin/wallet.html",
         transactions=paginated, type_filter=type_filter,
@@ -758,11 +782,16 @@ def reports():
     rpts   = db_select("listing_reports", "*",
                        filters={"status": status} if status else {},
                        order="-created_at")
-    for r in rpts:
-        reporter = db_select("users", "id,username", filters={"id": r["reporter_id"]}, single=True)
-        listing  = db_select("listings", "id,title,slug", filters={"id": r["listing_id"]}, single=True)
-        r["reporter"] = reporter
-        r["listing"]  = listing
+    if rpts:
+        reporter_ids = list({r["reporter_id"] for r in rpts if r.get("reporter_id")})
+        listing_ids  = list({r["listing_id"] for r in rpts if r.get("listing_id")})
+        reporters = db_select("users", "id,username", in_filters={"id": reporter_ids}) if reporter_ids else []
+        reporter_map = {u["id"]: u for u in reporters}
+        rlistings = db_select("listings", "id,title,slug", in_filters={"id": listing_ids}) if listing_ids else []
+        rlisting_map = {l["id"]: l for l in rlistings}
+        for r in rpts:
+            r["reporter"] = reporter_map.get(r["reporter_id"])
+            r["listing"]  = rlisting_map.get(r["listing_id"])
     return render_template("admin/reports.html", reports=rpts, status=status)
 
 
@@ -852,16 +881,19 @@ def logs():
     if action_f:
         all_logs = [l for l in all_logs if action_f in (l.get("action") or "")]
 
-    for l in all_logs:
-        if l.get("user_id"):
-            u = db_select("users", "id,username", filters={"id": l["user_id"]}, single=True)
-            l["user"] = u
-
     per_page  = 50
     total     = len(all_logs)
     start     = (page - 1) * per_page
     paginated = all_logs[start: start + per_page]
     pages     = max(1, -(-total // per_page))
+
+    if paginated:
+        log_user_ids = list({l["user_id"] for l in paginated if l.get("user_id")})
+        log_users = db_select("users", "id,username", in_filters={"id": log_user_ids}) if log_user_ids else []
+        log_user_map = {u["id"]: u for u in log_users}
+        for l in paginated:
+            if l.get("user_id"):
+                l["user"] = log_user_map.get(l["user_id"])
 
     return render_template("admin/logs.html",
         logs=paginated, action_f=action_f,
@@ -877,10 +909,83 @@ def support():
     tickets = db_select("support_tickets", "*",
                         filters={"status": status} if status else {},
                         order="-created_at")
-    for t in tickets:
-        u = db_select("users", "id,username,email", filters={"id": t["user_id"]}, single=True)
-        t["user"] = u
+    if tickets:
+        sup_user_ids = list({t["user_id"] for t in tickets if t.get("user_id")})
+        sup_users = db_select("users", "id,username,email", in_filters={"id": sup_user_ids}) if sup_user_ids else []
+        sup_user_map = {u["id"]: u for u in sup_users}
+        for t in tickets:
+            t["user"] = sup_user_map.get(t["user_id"])
     return render_template("admin/support.html", tickets=tickets, status=status)
+
+
+@admin_bp.route("/support/<ticket_id>")
+@admin_required
+def ticket_detail(ticket_id):
+    """BUG-003 fix: view an individual support ticket with its message thread."""
+    ticket = db_select("support_tickets", "*", filters={"id": ticket_id}, single=True)
+    if not ticket:
+        flash("Ticket not found.", "error")
+        return redirect(url_for("admin.support"))
+
+    # Enrich ticket with user info
+    u = db_select("users", "id,username,email", filters={"id": ticket["user_id"]}, single=True)
+    ticket["user"] = u
+
+    # Attach related order if any
+    if ticket.get("order_id"):
+        ticket["order"] = db_select("orders", "id,order_number,total,status",
+                                    filters={"id": ticket["order_id"]}, single=True)
+    else:
+        ticket["order"] = None
+
+    # Load the full message thread, enriched with sender info
+    messages = db_select("ticket_messages", "*",
+                         filters={"ticket_id": ticket_id},
+                         order="created_at")
+    for m in messages:
+        sender = db_select("users", "id,username", filters={"id": m["user_id"]}, single=True)
+        m["user"] = sender
+
+    return render_template("admin/ticket_detail.html", ticket=ticket, messages=messages)
+
+
+@admin_bp.route("/support/<ticket_id>/reply", methods=["POST"])
+@admin_required
+def reply_ticket(ticket_id):
+    """BUG-003 fix: post a staff reply and optionally update ticket status."""
+    ticket = db_select("support_tickets", "id,user_id,status", filters={"id": ticket_id}, single=True)
+    if not ticket:
+        flash("Ticket not found.", "error")
+        return redirect(url_for("admin.support"))
+
+    message = request.form.get("message", "").strip()
+    new_status = request.form.get("status", ticket["status"])
+    admin_id = session.get("user_id")
+
+    if not message:
+        flash("Reply message cannot be empty.", "error")
+        return redirect(url_for("admin.ticket_detail", ticket_id=ticket_id))
+
+    # Insert the staff reply
+    db_insert("ticket_messages", {
+        "ticket_id": ticket_id,
+        "user_id": admin_id,
+        "message": message,
+        "is_staff": True,
+    })
+
+    # Update ticket status if changed
+    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if new_status and new_status != ticket["status"]:
+        update_data["status"] = new_status
+        if new_status in ("resolved", "closed"):
+            update_data["closed_at"] = datetime.now(timezone.utc).isoformat()
+
+    db_update("support_tickets", update_data, {"id": ticket_id})
+
+    log_audit(admin_id, "ticket_reply", ticket_id, {"status": new_status})
+    flash("Reply sent successfully.", "success")
+    return redirect(url_for("admin.ticket_detail", ticket_id=ticket_id))
 
 
 # ── Escrow: Disputes ──────────────────────────────────────────
@@ -905,13 +1010,23 @@ def disputes():
     if reason:
         all_disputes = [d for d in all_disputes if d.get("reason") == reason]
 
-    for d in all_disputes:
-        raiser = db_select("users", "id,username,email", filters={"id": d["raised_by"]}, single=True)
-        against = db_select("users", "id,username,email", filters={"id": d["against_id"]}, single=True)
-        order = db_select("orders", "id,order_number", filters={"id": d["order_id"]}, single=True)
-        d["raiser"] = raiser
-        d["against"] = against
-        d["order"] = order
+    # Batched (search below depends on raiser/against/order fields, so
+    # enrichment has to stay before pagination — but it doesn't need to be
+    # one query per dispute).
+    if all_disputes:
+        d_user_ids = list({d["raised_by"] for d in all_disputes if d.get("raised_by")} |
+                          {d["against_id"] for d in all_disputes if d.get("against_id")})
+        d_users = db_select("users", "id,username,email", in_filters={"id": d_user_ids}) if d_user_ids else []
+        d_user_map = {u["id"]: u for u in d_users}
+
+        d_order_ids = list({d["order_id"] for d in all_disputes if d.get("order_id")})
+        d_orders = db_select("orders", "id,order_number", in_filters={"id": d_order_ids}) if d_order_ids else []
+        d_order_map = {o["id"]: o for o in d_orders}
+
+        for d in all_disputes:
+            d["raiser"]  = d_user_map.get(d["raised_by"])
+            d["against"] = d_user_map.get(d["against_id"])
+            d["order"]   = d_order_map.get(d["order_id"])
 
     if search:
         def _match(d):
@@ -956,17 +1071,28 @@ def payouts():
     if method:
         all_payouts = [p for p in all_payouts if p.get("method") == method]
 
-    for p in all_payouts:
-        seller = db_select("users", "id,username,email", filters={"id": p["seller_id"]}, single=True)
-        p["seller"] = seller
+    if all_payouts:
+        p_seller_ids = list({p["seller_id"] for p in all_payouts if p.get("seller_id")})
+        p_sellers = db_select("users", "id,username,email", in_filters={"id": p_seller_ids}) if p_seller_ids else []
+        p_seller_map = {s["id"]: s for s in p_sellers}
+
         # payout_history holds the real gateway_reference/failure_reason
-        # for this request (written by payout_request_approve /
+        # for each request (written by payout_request_approve /
         # payout_request_reject in migrations/002) — payout_requests
-        # itself has no such column, so pull the latest history row
-        # purely for display.
-        history = db_select("payout_history", "*", filters={"payout_request_id": p["id"]},
-                            order="-processed_at", limit=1)
-        p["history"] = history[0] if history else None
+        # itself has no such column, so pull the latest history row per
+        # request purely for display. Batched: one query for all matching
+        # history rows, then pick the latest per payout_request_id in
+        # Python, instead of one query per payout.
+        p_ids = [p["id"] for p in all_payouts]
+        all_history = db_select("payout_history", "*", in_filters={"payout_request_id": p_ids},
+                                order="-processed_at")
+        history_by_payout = {}
+        for h in all_history:
+            history_by_payout.setdefault(h["payout_request_id"], h)  # first seen = latest, since ordered desc
+
+        for p in all_payouts:
+            p["seller"]  = p_seller_map.get(p["seller_id"])
+            p["history"] = history_by_payout.get(p["id"])
 
     if search:
         def _match(p):

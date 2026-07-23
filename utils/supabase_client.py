@@ -62,16 +62,40 @@ def get_supabase() -> Client:
 
 def db_select(table: str, columns: str = "*", filters: dict | None = None,
               order: str | None = None, limit: int | None = None,
-              single: bool = False):
-    """Generic SELECT helper. Returns data list (or dict if single=True)."""
-    q = get_supabase().table(table).select(columns)
+              single: bool = False, in_filters: dict | None = None,
+              count_only: bool = False):
+    """Generic SELECT helper. Returns data list (or dict if single=True).
+
+    New (additive, backward-compatible) params — Phase 3 / BUG_INVENTORY
+    "N+1 / fetch-entire-table" observation:
+    - in_filters: dict of {column: [values...]} applied as `.in_(col, values)`,
+      for batching lookups that previously required N per-row queries
+      (e.g. fetching buyer/seller/user records for a page of orders in one
+      round trip instead of one query per row inside a for-loop).
+    - count_only: if True, skip fetching rows entirely and return just the
+      matching row count (int) via Supabase's exact-count mode. Use this
+      instead of `len(db_select(...))` for dashboard/admin stat tiles —
+      avoids transferring full rows just to discard them for a number.
+    """
+    q = get_supabase().table(table).select(
+        columns, count="exact" if count_only else None
+    )
     for col, val in (filters or {}).items():
         q = q.eq(col, val)
+    for col, vals in (in_filters or {}).items():
+        q = q.in_(col, list(vals))
     if order:
         desc = order.startswith("-")
         q = q.order(order.lstrip("-"), desc=desc)
     if limit:
         q = q.limit(limit)
+    if count_only:
+        try:
+            res = q.execute()
+            return res.count or 0
+        except Exception as e:
+            current_app.logger.error(f"db_select count({table}): {e}")
+            return 0
     if single:
         try:
             return q.single().execute().data

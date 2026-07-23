@@ -107,6 +107,16 @@ def create_app():
     def not_found(e):
         return render_template("errors/404.html"), 404
 
+    @app.errorhandler(401)
+    def unauthorized(e):
+        # BUG-009 fix: add 401 handler for parity with 403/404/429/500.
+        # Most auth gates in this app redirect rather than abort(401), so
+        # this is rarely hit today, but API routes and future abort(401)
+        # calls now get the themed 403 page (which is the most appropriate
+        # existing template for "you are not permitted here") rather than
+        # Flask's bare default.
+        return render_template("errors/403.html"), 401
+
     @app.errorhandler(403)
     def forbidden(e):
         return render_template("errors/403.html"), 403

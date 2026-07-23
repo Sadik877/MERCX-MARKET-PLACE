@@ -7,10 +7,15 @@
     <h1 class="font-display text-2xl font-bold">Payout Accounts</h1>
     <p style="color:var(--text-muted);font-size:.88rem">Manage where your earnings get sent</p>
   </div>
-  <button onclick="document.getElementById('add-account-modal').style.display='flex'"
-          class="btn btn-primary btn-sm flex items-center gap-2">
-    <i data-feather="plus" style="width:14px;height:14px"></i> Add Account
-  </button>
+  <div class="flex items-center gap-2">
+    <a href="{{ url_for('seller.withdrawals') }}" class="btn btn-sm" style="border:1px solid var(--border)">
+      <i data-feather="trending-down" style="width:14px;height:14px"></i> Request Payout
+    </a>
+    <button onclick="document.getElementById('add-account-modal').style.display='flex'"
+            class="btn btn-primary btn-sm flex items-center gap-2">
+      <i data-feather="plus" style="width:14px;height:14px"></i> Add Account
+    </button>
+  </div>
 </div>
 
 <!-- Flash messages -->

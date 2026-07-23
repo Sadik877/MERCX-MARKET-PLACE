@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: mercx-marketplace
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 3 --timeout 60 --log-file - --access-logfile -
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: WTF_CSRF_SECRET_KEY
+        generateValue: true
+      # ── Supabase ──────────────────────────────────────────
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: mercx-assets
+      # ── Email (Brevo) ─────────────────────────────────────
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_TIMEOUT
+        value: "10"
+      # ── Payment Gateways ──────────────────────────────────
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: FLUTTERWAVE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_PUBLIC_KEY
+        sync: false
+      - key: FLUTTERWAVE_WEBHOOK_SECRET
+        sync: false
+      # ── App Config ────────────────────────────────────────
+      - key: SITE_URL
+        sync: false
+      - key: COMMISSION_RATE
+        value: "10"
+      - key: SESSION_COOKIE_SECURE
+        value: "true"

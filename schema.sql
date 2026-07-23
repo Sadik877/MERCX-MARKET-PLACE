@@ -651,3 +651,168 @@ INSERT INTO public.site_settings (key, value, type, description, is_public) VALU
 ('max_cart_items',           '20',    'number', 'Max cart items',   false),
 ('max_downloads_per_purchase','5',    'number', 'Downloads/purchase',false),
 ('download_link_expiry_days','7',     'number', 'Download expiry',  false);
+
+
+-- ============================================================
+-- ESCROW & PAYOUT SYSTEM (formerly migrations/002 + 003)
+--
+-- These tables and functions were originally shipped as
+-- migrations/002_escrow_system.sql and
+-- migrations/003_seller_payout_accounts.sql. They are included
+-- here so that a fresh database can be bootstrapped from a
+-- single file.
+--
+-- If you are applying this to an existing database that already
+-- has migrations 002 and 003 applied, skip this section — all
+-- statements use CREATE TABLE IF NOT EXISTS / CREATE OR REPLACE
+-- FUNCTION so they are safe to re-run but will produce
+-- "already exists" notices rather than errors.
+--
+-- BUG-010 fix: schema.sql previously omitted these 9 tables,
+-- making the escrow/payout system non-bootstrappable from source.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.escrow_transactions (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id             UUID NOT NULL REFERENCES public.orders(id),
+    buyer_id             UUID NOT NULL REFERENCES public.users(id),
+    seller_id            UUID NOT NULL REFERENCES public.users(id),
+    amount               DECIMAL(15,2) NOT NULL CHECK (amount > 0),
+    platform_fee         DECIMAL(15,2) NOT NULL DEFAULT 0,
+    seller_earnings      DECIMAL(15,2) NOT NULL DEFAULT 0,
+    refunded_amount      DECIMAL(15,2) NOT NULL DEFAULT 0,
+    released_amount      DECIMAL(15,2) NOT NULL DEFAULT 0,
+    payment_method       VARCHAR(30)  NOT NULL,
+    payment_reference    VARCHAR(100) NOT NULL,
+    status               VARCHAR(20)  NOT NULL DEFAULT 'held',
+    auto_release_at      TIMESTAMPTZ,
+    held_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    delivered_at         TIMESTAMPTZ,
+    released_at          TIMESTAMPTZ,
+    refunded_at          TIMESTAMPTZ,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (payment_reference),
+    UNIQUE (order_id)
+);
+CREATE INDEX IF NOT EXISTS idx_escrow_tx_status       ON public.escrow_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_escrow_tx_auto_release  ON public.escrow_transactions(auto_release_at) WHERE status = 'delivered';
+CREATE INDEX IF NOT EXISTS idx_escrow_tx_buyer         ON public.escrow_transactions(buyer_id);
+CREATE INDEX IF NOT EXISTS idx_escrow_tx_seller        ON public.escrow_transactions(seller_id);
+
+CREATE TABLE IF NOT EXISTS public.escrow_events (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    escrow_transaction_id UUID NOT NULL REFERENCES public.escrow_transactions(id),
+    event_type           VARCHAR(40) NOT NULL,
+    actor_id             UUID REFERENCES public.users(id),
+    from_status          VARCHAR(20),
+    to_status             VARCHAR(20),
+    amount               DECIMAL(15,2),
+    metadata             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_escrow_events_tx ON public.escrow_events(escrow_transaction_id, created_at);
+
+CREATE TABLE IF NOT EXISTS public.escrow_holds (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    escrow_transaction_id UUID NOT NULL REFERENCES public.escrow_transactions(id),
+    held_amount          DECIMAL(15,2) NOT NULL CHECK (held_amount > 0),
+    remaining_amount      DECIMAL(15,2) NOT NULL,
+    status               VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_escrow_holds_tx ON public.escrow_holds(escrow_transaction_id);
+
+CREATE TABLE IF NOT EXISTS public.disputes (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    escrow_transaction_id UUID NOT NULL REFERENCES public.escrow_transactions(id),
+    order_id             UUID NOT NULL REFERENCES public.orders(id),
+    raised_by            UUID NOT NULL REFERENCES public.users(id),
+    against_id           UUID NOT NULL REFERENCES public.users(id),
+    reason               VARCHAR(50) NOT NULL,
+    description          TEXT,
+    status               VARCHAR(20) NOT NULL DEFAULT 'open',
+    resolution           VARCHAR(20),
+    resolution_amount    DECIMAL(15,2),
+    resolution_note      TEXT,
+    resolved_by          UUID REFERENCES public.users(id),
+    resolved_at          TIMESTAMPTZ,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_disputes_status ON public.disputes(status);
+CREATE INDEX IF NOT EXISTS idx_disputes_escrow ON public.disputes(escrow_transaction_id);
+
+CREATE TABLE IF NOT EXISTS public.dispute_messages (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dispute_id   UUID NOT NULL REFERENCES public.disputes(id),
+    sender_id    UUID NOT NULL REFERENCES public.users(id),
+    message      TEXT NOT NULL,
+    attachments  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_admin_note BOOLEAN NOT NULL DEFAULT false,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute ON public.dispute_messages(dispute_id, created_at);
+
+CREATE TABLE IF NOT EXISTS public.payout_requests (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    seller_id         UUID NOT NULL REFERENCES public.users(id),
+    amount            DECIMAL(15,2) NOT NULL CHECK (amount > 0),
+    method            VARCHAR(30) NOT NULL,
+    destination       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reference         VARCHAR(100) NOT NULL UNIQUE,
+    admin_id          UUID REFERENCES public.users(id),
+    notes             TEXT,
+    requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at      TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_seller ON public.payout_requests(seller_id);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_status ON public.payout_requests(status);
+
+CREATE TABLE IF NOT EXISTS public.payout_history (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payout_request_id UUID NOT NULL REFERENCES public.payout_requests(id),
+    seller_id         UUID NOT NULL REFERENCES public.users(id),
+    amount            DECIMAL(15,2) NOT NULL,
+    method            VARCHAR(30) NOT NULL,
+    status            VARCHAR(20) NOT NULL,
+    gateway_reference VARCHAR(150),
+    failure_reason    TEXT,
+    processed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_payout_history_request ON public.payout_history(payout_request_id);
+
+CREATE TABLE IF NOT EXISTS public.webhook_events (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    gateway          VARCHAR(20) NOT NULL,
+    event_id         VARCHAR(150) NOT NULL,
+    event_type       VARCHAR(100),
+    payload          JSONB NOT NULL,
+    signature_valid  BOOLEAN NOT NULL,
+    processed        BOOLEAN NOT NULL DEFAULT false,
+    processing_error TEXT,
+    received_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at     TIMESTAMPTZ,
+    UNIQUE (gateway, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_gateway ON public.webhook_events(gateway, received_at);
+
+CREATE TABLE IF NOT EXISTS public.seller_payout_accounts (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    seller_id    UUID NOT NULL REFERENCES public.users(id),
+    method       VARCHAR(30) NOT NULL,
+    label        VARCHAR(100),
+    details      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_default   BOOLEAN NOT NULL DEFAULT false,
+    is_verified  BOOLEAN NOT NULL DEFAULT false,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_seller_payout_accounts_seller ON public.seller_payout_accounts(seller_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_seller_payout_accounts_one_default
+    ON public.seller_payout_accounts(seller_id) WHERE is_default;
