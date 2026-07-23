@@ -7,7 +7,7 @@ from utils.supabase_client import (db_select, db_insert, db_update,
                                    increment_download_count_atomic, WalletOperationError)
 from utils.decorators import login_required, verified_required
 from utils.helpers import (generate_token, hash_token, generate_reference,
-                           fmt_price, allowed_image, safe_filename, log_audit)
+                           fmt_price, allowed_image, safe_filename, log_audit, make_slug)
 from utils.email import send_deposit_confirmation, send_withdrawal_processed
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -585,8 +585,7 @@ def become_seller():
         flash("Store name is required.", "danger")
         return redirect(url_for("dashboard.settings"))
 
-    from python_slugify import slugify as _slugify
-    slug = _slugify(store_name)
+    slug = make_slug(store_name, suffix=False)
 
     db_update("users", {"role": "seller"}, {"id": uid})
     db_update("user_profiles", {

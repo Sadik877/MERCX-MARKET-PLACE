@@ -402,12 +402,12 @@ def request_payout():
         assert cfg.get("MIN_WITHDRAWAL", 10) <= amount <= cfg.get("MAX_WITHDRAWAL", 10000)
     except (ValueError, AssertionError, TypeError):
         flash("Invalid payout amount.", "danger")
-        return redirect(url_for("seller.wallet"))
+        return redirect(url_for("seller.withdrawals"))
 
     user = db_select("users", "balance", filters={"id": sid}, single=True)
     if not user or float(user.get("balance", 0)) < amount:
         flash("Insufficient available balance for this payout.", "danger")
-        return redirect(url_for("seller.wallet"))
+        return redirect(url_for("seller.withdrawals"))
 
     db_insert("payout_requests", {
         "seller_id":   sid,
@@ -419,7 +419,7 @@ def request_payout():
     })
     log_audit(sid, "payout_request", details={"amount": amount, "method": method})
     flash("Payout request submitted. It will be reviewed within 1–2 business days.", "success")
-    return redirect(url_for("seller.wallet"))
+    return redirect(url_for("seller.withdrawals"))
 
 
 # ── Admin: approve / reject a payout request ──────────────────────

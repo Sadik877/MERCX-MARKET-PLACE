@@ -273,7 +273,9 @@ def stripe_webhook():
 
 @api_bp.route("/payment/paystack/webhook", methods=["POST"])
 def paystack_webhook():
-    secret  = current_app.config.get("PAYSTACK_SECRET_KEY", "")
+    secret = current_app.config.get("PAYSTACK_SECRET_KEY", "")
+    if not secret:
+        return jsonify({"error": "Not configured"}), 400
     sig     = request.headers.get("x-paystack-signature", "")
     payload = request.get_data()
     expected = hmac.new(secret.encode(), payload, hashlib.sha512).hexdigest()

@@ -768,8 +768,7 @@ def store_settings():
         twitter    = request.form.get("twitter", "").strip()[:100]
         github     = request.form.get("github", "").strip()[:100]
 
-        from python_slugify import slugify as _slugify
-        slug = _slugify(store_name)
+        slug = make_slug(store_name, suffix=False)
 
         db_update("user_profiles", {
             "store_name":        store_name,
