@@ -1,10 +1,8 @@
-import smtplib
-import socket
-import ssl
+import re
 import threading
 import time
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+
+import requests
 from flask import current_app, render_template_string
 
 
@@ -48,68 +46,91 @@ def _render(body_html: str) -> str:
     return render_template_string(_BASE, body=body_html)
 
 
-# ── SMTP send ─────────────────────────────────────────────────
+# ── Brevo HTTP API send ──────────────────────────────────────
+
+_SENDER_RE = re.compile(r"^\s*(?:(?P<name>.*?)\s*<(?P<email>[^<>]+)>|(?P<bare>\S+))\s*$")
+
+
+def _parse_sender(raw: str) -> dict:
+    """Split a 'Name <email@x.com>' or bare 'email@x.com' string into
+    the {name, email} shape Brevo's API expects."""
+    m = _SENDER_RE.match(raw or "")
+    if not m:
+        return {"email": raw}
+    if m.group("email"):
+        sender = {"email": m.group("email").strip()}
+        if m.group("name"):
+            sender["name"] = m.group("name").strip()
+        return sender
+    return {"email": m.group("bare").strip()}
+
 
 def send_email(to: str, subject: str, html_body: str) -> bool:
-    """Send a single HTML email synchronously. Returns True on success.
+    """Send a single HTML email via the Brevo transactional API.
+    Returns True on success.
 
-    Every network call here is bounded by MAIL_TIMEOUT (default 10s),
-    so a slow DNS lookup, an unreachable host, or a stalled TLS
-    handshake can never block the calling thread — and therefore
-    never hang or SIGKILL a Gunicorn worker — indefinitely.
+    This is a single HTTPS POST (port 443), not an SMTP socket
+    connection — that's deliberate. Render's free-tier web services
+    block all outbound traffic on SMTP ports (25/465/587), which is
+    what caused prior "Network is unreachable" failures. HTTPS is
+    never blocked, so this works on any Render plan.
+
+    The request is bounded by BREVO_TIMEOUT (default 10s), so a slow
+    or unreachable API endpoint can never block the calling thread —
+    and therefore never hang or SIGKILL a Gunicorn worker — indefinitely.
 
     For request handlers where even a few seconds of added latency is
     undesirable (e.g. forgot-password), prefer send_email_background()
     instead of calling this directly.
     """
     cfg = current_app.config
-    mail_server = cfg.get("MAIL_SERVER")
-    mail_port   = cfg.get("MAIL_PORT")
-    timeout     = cfg.get("MAIL_TIMEOUT", 10)
+    api_key = cfg.get("BREVO_API_KEY")
+    timeout = cfg.get("BREVO_TIMEOUT", 10)
 
-    if not cfg.get("MAIL_USERNAME") or not cfg.get("MAIL_PASSWORD") or not mail_server or not mail_port:
+    if not api_key:
         current_app.logger.warning(
-            "Email not sent to %s — MAIL_* environment variables are not fully configured.", to
+            "Email not sent to %s — BREVO_API_KEY is not configured.", to
         )
         return False
 
     started = time.monotonic()
     current_app.logger.info("Email send started: to=%s subject=%r", to, subject)
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = cfg["MAIL_DEFAULT_SENDER"]
-        msg["To"]      = to
-        msg.attach(MIMEText(html_body, "html"))
-
-        ctx = ssl.create_default_context()
-        use_ssl = cfg.get("MAIL_USE_SSL", False)
-
-        # Implicit SSL (typically port 465) vs. plaintext-then-STARTTLS
-        # (typically port 587) require different smtplib classes — mixing
-        # them up is a classic cause of hangs/handshake errors. Pick the
-        # right one based on config instead of assuming STARTTLS.
-        if use_ssl:
-            srv_factory = lambda: smtplib.SMTP_SSL(mail_server, mail_port, timeout=timeout, context=ctx)
-        else:
-            srv_factory = lambda: smtplib.SMTP(mail_server, mail_port, timeout=timeout)
-
-        with srv_factory() as srv:
-            current_app.logger.info("SMTP connection established to %s:%s", mail_server, mail_port)
-            if not use_ssl and cfg.get("MAIL_USE_TLS"):
-                srv.starttls(context=ctx)
-            srv.login(cfg["MAIL_USERNAME"], cfg["MAIL_PASSWORD"])
-            srv.sendmail(cfg["MAIL_DEFAULT_SENDER"], to, msg.as_string())
-
-        current_app.logger.info(
-            "Email sent successfully to=%s duration=%.2fs", to, time.monotonic() - started
+        payload = {
+            "sender": _parse_sender(cfg.get("MAIL_DEFAULT_SENDER", "")),
+            "to": [{"email": to}],
+            "subject": subject,
+            "htmlContent": html_body,
+        }
+        resp = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            json=payload,
+            headers={
+                "api-key": api_key,
+                "accept": "application/json",
+                "content-type": "application/json",
+            },
+            timeout=timeout,
         )
-        return True
-    except (smtplib.SMTPException, socket.timeout, socket.gaierror, OSError, ssl.SSLError) as e:
-        # Expected failure modes: bad credentials, unreachable host,
-        # connection refused, timed-out handshake, DNS failure, etc.
-        # None of these should ever propagate as an unhandled 500 or
-        # block the worker — log the technical detail server-side only.
+
+        if resp.status_code in (200, 201):
+            current_app.logger.info(
+                "Email sent successfully to=%s duration=%.2fs", to, time.monotonic() - started
+            )
+            return True
+
+        # Brevo returns 4xx/5xx with a JSON {code, message} body on
+        # failure (bad API key, unverified sender, invalid recipient,
+        # rate limit, etc.) — log the detail, never the API key itself.
+        current_app.logger.error(
+            "Email send FAILED to=%s duration=%.2fs status=%s body=%s",
+            to, time.monotonic() - started, resp.status_code, resp.text[:500],
+        )
+        return False
+    except requests.RequestException as e:
+        # Expected failure modes: connection error, DNS failure, timeout,
+        # SSL error, etc. None of these should ever propagate as an
+        # unhandled 500 or block the worker — log server-side only.
         current_app.logger.error(
             "Email send FAILED to=%s duration=%.2fs error=%s: %s",
             to, time.monotonic() - started, type(e).__name__, e,
