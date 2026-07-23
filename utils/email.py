@@ -1,5 +1,8 @@
 import smtplib
+import socket
 import ssl
+import threading
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import current_app, render_template_string
@@ -48,11 +51,30 @@ def _render(body_html: str) -> str:
 # ── SMTP send ─────────────────────────────────────────────────
 
 def send_email(to: str, subject: str, html_body: str) -> bool:
-    """Send a single HTML email. Returns True on success."""
+    """Send a single HTML email synchronously. Returns True on success.
+
+    Every network call here is bounded by MAIL_TIMEOUT (default 10s),
+    so a slow DNS lookup, an unreachable host, or a stalled TLS
+    handshake can never block the calling thread — and therefore
+    never hang or SIGKILL a Gunicorn worker — indefinitely.
+
+    For request handlers where even a few seconds of added latency is
+    undesirable (e.g. forgot-password), prefer send_email_background()
+    instead of calling this directly.
+    """
     cfg = current_app.config
-    if not cfg.get("MAIL_USERNAME"):
-        current_app.logger.warning("Email not configured — skipping send.")
+    mail_server = cfg.get("MAIL_SERVER")
+    mail_port   = cfg.get("MAIL_PORT")
+    timeout     = cfg.get("MAIL_TIMEOUT", 10)
+
+    if not cfg.get("MAIL_USERNAME") or not cfg.get("MAIL_PASSWORD") or not mail_server or not mail_port:
+        current_app.logger.warning(
+            "Email not sent to %s — MAIL_* environment variables are not fully configured.", to
+        )
         return False
+
+    started = time.monotonic()
+    current_app.logger.info("Email send started: to=%s subject=%r", to, subject)
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -61,15 +83,70 @@ def send_email(to: str, subject: str, html_body: str) -> bool:
         msg.attach(MIMEText(html_body, "html"))
 
         ctx = ssl.create_default_context()
-        with smtplib.SMTP(cfg["MAIL_SERVER"], cfg["MAIL_PORT"]) as srv:
-            if cfg["MAIL_USE_TLS"]:
+        use_ssl = cfg.get("MAIL_USE_SSL", False)
+
+        # Implicit SSL (typically port 465) vs. plaintext-then-STARTTLS
+        # (typically port 587) require different smtplib classes — mixing
+        # them up is a classic cause of hangs/handshake errors. Pick the
+        # right one based on config instead of assuming STARTTLS.
+        if use_ssl:
+            srv_factory = lambda: smtplib.SMTP_SSL(mail_server, mail_port, timeout=timeout, context=ctx)
+        else:
+            srv_factory = lambda: smtplib.SMTP(mail_server, mail_port, timeout=timeout)
+
+        with srv_factory() as srv:
+            current_app.logger.info("SMTP connection established to %s:%s", mail_server, mail_port)
+            if not use_ssl and cfg.get("MAIL_USE_TLS"):
                 srv.starttls(context=ctx)
             srv.login(cfg["MAIL_USERNAME"], cfg["MAIL_PASSWORD"])
             srv.sendmail(cfg["MAIL_DEFAULT_SENDER"], to, msg.as_string())
+
+        current_app.logger.info(
+            "Email sent successfully to=%s duration=%.2fs", to, time.monotonic() - started
+        )
         return True
-    except Exception as e:
-        current_app.logger.error(f"send_email to {to}: {e}")
+    except (smtplib.SMTPException, socket.timeout, socket.gaierror, OSError, ssl.SSLError) as e:
+        # Expected failure modes: bad credentials, unreachable host,
+        # connection refused, timed-out handshake, DNS failure, etc.
+        # None of these should ever propagate as an unhandled 500 or
+        # block the worker — log the technical detail server-side only.
+        current_app.logger.error(
+            "Email send FAILED to=%s duration=%.2fs error=%s: %s",
+            to, time.monotonic() - started, type(e).__name__, e,
+        )
         return False
+    except Exception as e:
+        current_app.logger.error(
+            "Email send FAILED (unexpected) to=%s duration=%.2fs error=%s: %s",
+            to, time.monotonic() - started, type(e).__name__, e,
+        )
+        return False
+
+
+def send_email_background(app, func, *args, **kwargs) -> None:
+    """Run one of the send_* helpers on a daemon thread bound to its
+    own application context, so the calling request returns to the
+    user immediately regardless of SMTP latency.
+
+    This is a second, independent layer of protection on top of
+    MAIL_TIMEOUT in send_email() — even if a timeout were ever
+    misconfigured, the HTTP response path itself never touches the
+    network. Use for any request where "the email might be slow"
+    should never mean "the request is slow".
+
+        send_email_background(
+            current_app._get_current_object(),
+            send_password_reset_email, email, username, reset_url,
+        )
+    """
+    def _run():
+        with app.app_context():
+            try:
+                func(*args, **kwargs)
+            except Exception:
+                app.logger.exception("Background email task %s failed", getattr(func, "__name__", func))
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ── Transactional email helpers ───────────────────────────────
