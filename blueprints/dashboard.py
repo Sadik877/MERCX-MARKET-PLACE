@@ -388,6 +388,29 @@ def messages():
                                  else c["unread_count_2"])
             c["last_preview"] = preview_map.get(c["id"], "")
 
+    # BUG-013 FIX: support ?with=<user_id> so "Message Seller" links on the
+    # listing and seller-store pages can pre-open (or pre-create) a conversation
+    # with a specific user rather than landing the buyer on a generic empty inbox.
+    # Resolve ?with= → a conversation_id (existing or newly created), then fall
+    # through to the normal ?conversation= path below.
+    with_uid = request.args.get("with", "").strip()
+    if with_uid and with_uid != uid:
+        existing = (
+            db_select("conversations", "id", filters={"participant_1": uid,  "participant_2": with_uid}, single=True)
+            or db_select("conversations", "id", filters={"participant_1": with_uid, "participant_2": uid}, single=True)
+        )
+        if existing:
+            return redirect(url_for("dashboard.messages", conversation=existing["id"]))
+        # No existing conversation — create a stub so the UI opens a fresh chat.
+        new_conv = db_insert("conversations", {
+            "participant_1":   uid,
+            "participant_2":   with_uid,
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+        })
+        if new_conv:
+            return redirect(url_for("dashboard.messages", conversation=new_conv["id"]))
+        # DB insert failed — fall through to empty inbox rather than 500ing.
+
     active_id = request.args.get("conversation")
     chat      = []
     active    = None
@@ -439,10 +462,28 @@ def send_message():
         "receiver_id":     recv_id,
         "content":         content[:2000],
     })
-    db_update("conversations", {
-        "last_message_at": datetime.now(timezone.utc).isoformat(),
-        "unread_count_2":  1,
-    }, {"id": conv_id})
+    # BUG-014 FIX: determine which participant is the receiver and increment
+    # their unread counter (not the sender's), and add 1 to the current value
+    # rather than resetting to 1.  Previous code always wrote "unread_count_2: 1",
+    # which (a) chose the wrong column when participant_2 is the sender, and
+    # (b) capped unread messages at 1 for everyone, losing the real unread total.
+    conv_row = db_select("conversations", "participant_1,unread_count_1,unread_count_2",
+                         filters={"id": conv_id}, single=True)
+    if conv_row:
+        if conv_row["participant_1"] == uid:
+            # uid is participant_1, so recv_id is participant_2 — their counter is unread_count_2
+            new_count = (conv_row.get("unread_count_2") or 0) + 1
+            unread_update = {"unread_count_2": new_count}
+        else:
+            # uid is participant_2, so recv_id is participant_1 — their counter is unread_count_1
+            new_count = (conv_row.get("unread_count_1") or 0) + 1
+            unread_update = {"unread_count_1": new_count}
+        unread_update["last_message_at"] = datetime.now(timezone.utc).isoformat()
+        db_update("conversations", unread_update, {"id": conv_id})
+    else:
+        db_update("conversations", {
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+        }, {"id": conv_id})
 
     db_insert("notifications", {
         "user_id": recv_id,

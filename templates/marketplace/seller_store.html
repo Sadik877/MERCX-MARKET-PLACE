@@ -39,7 +39,7 @@
       </div>
     </div>
     {% if current_user_id and current_user_id != seller.id %}
-    <a href="{{ url_for('dashboard.messages') }}" class="btn btn-outline btn-sm flex-shrink-0">
+    <a href="{{ url_for('dashboard.messages') }}?with={{ seller.id }}" class="btn btn-outline btn-sm flex-shrink-0">
       <i data-feather="message-circle" style="width:14px;height:14px"></i> Message
     </a>
     {% endif %}

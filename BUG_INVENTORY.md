@@ -777,3 +777,113 @@ blueprints batched) and visually (confirmed, not just assumed, that every page i
 `templates/seller/` meets the existing design bar). Next Phase 4 area is open — candidates
 per the original list: admin panel visual polish, buyer experience, public marketplace
 site, mobile responsiveness pass.
+
+---
+
+## Session 5 — Buyer Experience Audit
+
+**Scope:** Continued from FIX_ROADMAP.md's "NEXT RECOMMENDED STEP" as left by session 4.
+Chose **buyer experience** as the next Phase 4 area. Ran a full functional audit before any
+visual work — consistent with established pattern. Found and fixed three real bugs.
+
+**Verification performed:**
+- `python3 -m py_compile blueprints/dashboard.py app.py` — clean
+- Full `url_for()` vs registered-endpoint sweep (123 endpoints) — zero dangling references
+- All BUG-001 through BUG-012 + Items 14–17 spot-checked — all still present, no regressions
+
+---
+
+## BUG-013
+**Category:** Buyer Experience / Messaging
+**Severity:** High
+**File:** `templates/marketplace/listing.html` (L284), `templates/marketplace/seller_store.html` (L42), `blueprints/dashboard.py::messages()`
+**Route:** `GET /dashboard/messages`
+**Symptom:** Clicking "Message Seller" on a product page or store page drops the buyer into
+the generic messages inbox with no indication of who they were trying to contact. If they've
+never messaged that seller before, they see an empty inbox with no entry point to start the
+specific conversation.
+**Root Cause:** Both template buttons linked to `url_for('dashboard.messages')` with no query
+parameters. The `messages()` route only supported `?conversation=<id>` for opening an
+*existing* conversation — there was no `?with=<user_id>` path to pre-create or pre-open a
+conversation with a specific seller.
+**Evidence:**
+```
+$ grep -n "url_for.*dashboard.messages" templates/marketplace/listing.html
+L284: <a href="{{ url_for('dashboard.messages') }}" ...>  ← no seller context
+$ grep -n "url_for.*dashboard.messages" templates/marketplace/seller_store.html
+L42:  <a href="{{ url_for('dashboard.messages') }}" ...>  ← no seller context
+$ grep -n "def messages" blueprints/dashboard.py
+# only ?conversation= param handled — no ?with= handler
+```
+**Recommended Fix / Resolution:**
+- `blueprints/dashboard.py::messages()` now handles `?with=<seller_id>`: finds an existing
+  conversation between the buyer and that seller, or creates a conversation stub, then
+  redirects to `?conversation=<id>`. Falls through to empty inbox gracefully on any DB error.
+- `templates/marketplace/listing.html` "Message Seller" link updated to append `?with={{ seller.id }}`.
+- `templates/marketplace/seller_store.html` "Message" link updated to append `?with={{ seller.id }}`.
+**Status: FIXED** (session 5)
+
+---
+
+## BUG-014
+**Category:** Messaging / Data Integrity
+**Severity:** High
+**File:** `blueprints/dashboard.py::send_message()` (L442–445 before fix)
+**Route:** `POST /dashboard/messages/send`
+**Symptom:** (a) If a seller has 3 unread messages and receives a 4th, their badge still shows
+1 instead of 4. (b) When `participant_2` of a conversation sends a message to `participant_1`,
+`participant_1`'s unread badge never increments — `participant_2`'s counter (the *sender's*
+own counter) gets set to 1 instead.
+**Root Cause:** The `db_update` was hardcoded as `{"unread_count_2": 1}` — always the `_2`
+column regardless of who the actual receiver is, and always the literal value `1` instead of
+current + 1. The `conversations` table has `unread_count_1` (for when participant_1 is the
+receiver) and `unread_count_2` (for when participant_2 is the receiver). The code must
+determine which participant is the receiver, then increment their counter, not reset it.
+**Evidence:**
+```python
+# blueprints/dashboard.py (before fix), send_message():
+db_update("conversations", {
+    "last_message_at": datetime.now(timezone.utc).isoformat(),
+    "unread_count_2":  1,   # ← always _2, always 1
+}, {"id": conv_id})
+```
+Schema confirmation:
+```sql
+CREATE TABLE public.conversations (
+    unread_count_1 INTEGER DEFAULT 0,  -- unread count for participant_1
+    unread_count_2 INTEGER DEFAULT 0,  -- unread count for participant_2
+    ...
+);
+```
+**Recommended Fix / Resolution:** After inserting the message, fetch the conversation row to
+determine which participant is the receiver (participant_1 or participant_2), read their
+current unread count, and write `current + 1` to the correct column in the same `db_update`
+call. This is a read-then-write, not a fully atomic increment, but unread counts are a
+best-effort display value (not financial data), and it's substantially correct vs. always
+resetting to 1 with the wrong column.
+**Status: FIXED** (session 5)
+
+---
+
+## BUG-015
+**Category:** Performance / N+1 (Global Impact)
+**Severity:** Medium
+**File:** `app.py::inject_globals()` context processor
+**Route:** All routes — fires on every request for every logged-in user
+**Symptom:** Two unnecessary full-row fetches run on every page load site-wide. This is the
+highest-traffic N+1 left in the codebase: unlike the per-feature N+1s fixed in sessions 3–4,
+this one multiplies across every page render for every logged-in user.
+**Root Cause:**
+```python
+# app.py (before fix):
+cart_count  = len(db_select("cart_items",    "id", filters={"user_id": uid}))
+notif_count = len(db_select("notifications", "id", filters={"user_id": uid, "is_read": False}))
+```
+Both queries fetched every matching row's `id` column just to discard it for a count. The
+`count_only=True` capability was added to `db_select()` in Session 3 specifically for this
+pattern — but the context processor itself was never updated to use it. This is especially
+impactful because the context processor runs on *every* page, not just within a specific
+feature area.
+**Recommended Fix / Resolution:** Switch both to `count_only=True`, which uses Supabase's
+`count="exact"` mode and transfers no row data.
+**Status: FIXED** (session 5)

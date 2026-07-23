@@ -248,3 +248,46 @@ out" note for the reasoning on why the latter group didn't get cosmetic changes.
    existing GIN index is actually used. Needs a live DB to write and verify.
 4. **Item 15 — COMPLETE.** No further follow-through needed unless a future session finds
    new N+1s introduced by other work.
+
+---
+
+## Session 5 — Phase 4: Buyer Experience (functional audit)
+
+**Continued from:** Session 4's "NEXT RECOMMENDED STEP" — chose buyer experience as the next
+Phase 4 area. Ran a full functional audit before any visual work.
+
+**Work completed:**
+
+Three new bugs found and fixed (see BUG_INVENTORY.md Session 5 section for full detail):
+
+| Bug | File(s) | Status |
+|---|---|---|
+| BUG-013 | `dashboard.py::messages()`, `listing.html`, `seller_store.html` | **FIXED** — `?with=<seller_id>` handler added; template links updated |
+| BUG-014 | `dashboard.py::send_message()` | **FIXED** — correct unread_count column + real increment instead of hardcoded `1` |
+| BUG-015 | `app.py::inject_globals()` | **FIXED** — `count_only=True` for cart and notification badge counts (fires on every page) |
+
+**Verification:**
+- `py_compile` clean on `blueprints/dashboard.py` and `app.py`
+- Full `url_for()` sweep (123 endpoints): zero dangling references
+
+**Not yet done (buyer experience):**
+- Visual polish pass on `dashboard/wallet.html`, `dashboard/orders.html`,
+  `marketplace/cart.html`, `marketplace/checkout.html` — functionally sound, not yet reviewed
+  for design consistency.
+- `templates/index.html` and `templates/base.html` visual review (public site / landing page).
+- Mobile responsiveness pass — deferred from every prior session, still open.
+- Live staging walkthrough — still the biggest unverified gap (needs real Supabase environment).
+- Item 17 GIN index migration (needs live DB).
+
+## NEXT RECOMMENDED STEP (for next session)
+
+1. **Continue buyer experience** — audit and optionally polish: `dashboard/wallet.html`,
+   `dashboard/orders.html`, `marketplace/cart.html`, `marketplace/checkout.html`.
+2. **Public site** — `templates/index.html` and `templates/base.html` visual review.
+3. **Live staging verification pass** — still the largest unverified gap. Specifically:
+   - End-to-end payout request via `seller/withdrawals.html` modal (BUG-012 fix)
+   - `count_only()`/`in_filters()` batching against real Supabase responses
+   - "Message Seller" → new conversation flow (BUG-013 fix)
+4. **Item 17** — add migration for generated `tsvector` column matching `idx_listings_search`
+   expression, then point `.text_search()` at it. Needs live DB.
+5. **Mobile responsiveness** — deferred again; candidate for a dedicated session.

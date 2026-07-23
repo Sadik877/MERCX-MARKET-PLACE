@@ -79,9 +79,16 @@ def create_app():
 
         if uid:
             try:
-                cart_count  = len(db_select("cart_items", "id", filters={"user_id": uid}))
-                notif_count = len(db_select("notifications", "id",
-                                            filters={"user_id": uid, "is_read": False}))
+                # BUG-015 FIX: use count_only=True (Supabase exact-count mode, no row data
+                # transferred) instead of len(db_select(..., "id", ...)).  These two queries
+                # fire on EVERY page request for every logged-in user, making them the
+                # highest-traffic N+1 in the codebase — the savings here multiply across
+                # every page load, unlike the per-feature fixes applied in sessions 3–4.
+                cart_count  = db_select("cart_items",    "id", filters={"user_id": uid},
+                                        count_only=True) or 0
+                notif_count = db_select("notifications", "id",
+                                        filters={"user_id": uid, "is_read": False},
+                                        count_only=True) or 0
                 convs1 = db_select("conversations", "unread_count_1",
                                    filters={"participant_1": uid})
                 convs2 = db_select("conversations", "unread_count_2",
