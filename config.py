@@ -28,9 +28,16 @@ class Config:
     MAIL_SERVER         = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     MAIL_PORT           = int(os.environ.get("MAIL_PORT", 587))
     MAIL_USE_TLS        = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+    # Only relevant on implicit-SSL ports (typically 465). Leave false for
+    # STARTTLS ports like 587 — enabling both would be an invalid combo.
+    MAIL_USE_SSL        = os.environ.get("MAIL_USE_SSL", "false").lower() == "true"
     MAIL_USERNAME       = os.environ.get("MAIL_USERNAME", "")
     MAIL_PASSWORD       = os.environ.get("MAIL_PASSWORD", "")
     MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", "MercX Digital <noreply@mercxdigital.com>")
+    # Hard ceiling on SMTP connect/handshake/send time. This is what
+    # stops a slow or unreachable mail host from hanging a Gunicorn
+    # worker until it gets SIGKILLed — never remove or set to None.
+    MAIL_TIMEOUT        = int(os.environ.get("MAIL_TIMEOUT", 10))
 
     # ── Payment Gateways ──────────────────────────────────────
     STRIPE_SECRET_KEY        = os.environ.get("STRIPE_SECRET_KEY", "")
