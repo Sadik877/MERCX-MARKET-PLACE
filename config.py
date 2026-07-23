@@ -24,20 +24,18 @@ class Config:
     SUPABASE_ANON_KEY    = os.environ.get("SUPABASE_ANON_KEY", "")
     SUPABASE_BUCKET      = os.environ.get("SUPABASE_STORAGE_BUCKET", "mercx-assets")
 
-    # ── Email ─────────────────────────────────────────────────
-    MAIL_SERVER         = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
-    MAIL_PORT           = int(os.environ.get("MAIL_PORT", 587))
-    MAIL_USE_TLS        = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
-    # Only relevant on implicit-SSL ports (typically 465). Leave false for
-    # STARTTLS ports like 587 — enabling both would be an invalid combo.
-    MAIL_USE_SSL        = os.environ.get("MAIL_USE_SSL", "false").lower() == "true"
-    MAIL_USERNAME       = os.environ.get("MAIL_USERNAME", "")
-    MAIL_PASSWORD       = os.environ.get("MAIL_PASSWORD", "")
-    MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", "MercX Digital <noreply@mercxdigital.com>")
-    # Hard ceiling on SMTP connect/handshake/send time. This is what
-    # stops a slow or unreachable mail host from hanging a Gunicorn
-    # worker until it gets SIGKILLed — never remove or set to None.
-    MAIL_TIMEOUT        = int(os.environ.get("MAIL_TIMEOUT", 10))
+    # ── Email (Brevo transactional HTTP API) ─────────────────
+    # Switched from raw SMTP because Render's free tier blocks all
+    # outbound traffic on SMTP ports (25/465/587). Brevo's API is
+    # plain HTTPS on port 443, which is never blocked, and it's a
+    # single HTTP call instead of a stateful socket connection —
+    # no handshake to hang, no worker-killing timeout risk.
+    BREVO_API_KEY        = os.environ.get("BREVO_API_KEY", "")
+    MAIL_DEFAULT_SENDER  = os.environ.get("MAIL_DEFAULT_SENDER", "MercX Digital <noreply@mercxdigital.com>")
+    # Hard ceiling on the Brevo API call. This is what stops a slow
+    # or unreachable API endpoint from hanging a Gunicorn worker
+    # until it gets SIGKILLed — never remove or set to None.
+    BREVO_TIMEOUT        = int(os.environ.get("BREVO_TIMEOUT", 10))
 
     # ── Payment Gateways ──────────────────────────────────────
     STRIPE_SECRET_KEY        = os.environ.get("STRIPE_SECRET_KEY", "")
