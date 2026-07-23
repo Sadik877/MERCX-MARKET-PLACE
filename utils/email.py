@@ -128,6 +128,14 @@ def send_email_background(app, func, *args, **kwargs) -> None:
     own application context, so the calling request returns to the
     user immediately regardless of SMTP latency.
 
+    Email bodies are rendered with render_template_string(), and Flask
+    runs *every* registered @app.context_processor (including app.py's
+    inject_globals, which reads session/request) on every template
+    render — not just ones triggered by a real HTTP request. An
+    app_context() alone isn't enough for that; we also push a throwaway
+    test_request_context() so session/request resolve to empty/dummy
+    values instead of raising "Working outside of request context".
+
     This is a second, independent layer of protection on top of
     MAIL_TIMEOUT in send_email() — even if a timeout were ever
     misconfigured, the HTTP response path itself never touches the
@@ -140,7 +148,7 @@ def send_email_background(app, func, *args, **kwargs) -> None:
         )
     """
     def _run():
-        with app.app_context():
+        with app.app_context(), app.test_request_context():
             try:
                 func(*args, **kwargs)
             except Exception:
