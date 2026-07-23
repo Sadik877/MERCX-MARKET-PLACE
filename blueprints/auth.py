@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from utils.supabase_client import (db_select, db_insert, db_update,
                                    wallet_credit_idempotent, WalletOperationError)
 from utils.helpers import generate_token, hash_token, generate_referral_code, log_audit
-from utils.email import send_verification_email, send_password_reset_email
+from utils.email import send_verification_email, send_password_reset_email, send_email_background
 from utils.decorators import guest_only, login_required
 
 auth_bp = Blueprint("auth", __name__)
@@ -285,7 +285,14 @@ def forgot_password():
                 "password_reset_expires": expires,
             }, {"id": user["id"]})
             reset_url = url_for("auth.reset_password", token=raw, _external=True)
-            send_password_reset_email(email, user["username"], reset_url)
+            # Dispatched on a background thread: SMTP I/O must never sit
+            # inside the request/response cycle, or a slow/unreachable
+            # mail host will stall this view until Gunicorn kills the
+            # worker (see utils/email.send_email_background docstring).
+            send_email_background(
+                current_app._get_current_object(),
+                send_password_reset_email, email, user["username"], reset_url,
+            )
 
         flash("If that email exists, a reset link has been sent.", "success")
         return redirect(url_for("auth.forgot_password"))
