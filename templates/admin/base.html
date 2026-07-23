@@ -31,6 +31,16 @@
       </a>
       {% endfor %}
 
+
+      <div class="sidebar-section mt-4">Escrow</div>
+      {% for endpoint, icon, label in [('admin.disputes','alert-triangle','Disputes'),('admin.payouts','send','Payouts')] %}
+      <a href="{{ url_for(endpoint) }}"
+         class="sidebar-link {% if request.endpoint == endpoint %}active{% endif %}"
+         style="{% if request.endpoint == endpoint %}background:rgba(245,158,11,.12);color:#FCD34D;border-color:rgba(245,158,11,.2){% endif %}">
+        <i data-feather="{{ icon }}" class="icon"></i>{{ label }}
+      </a>
+      {% endfor %}
+
       <div class="sidebar-section mt-4">Catalogue</div>
       {% for endpoint, icon, label in [('admin.categories','grid','Categories'),('admin.coupons','tag','Coupons'),('admin.reports','flag','Reports'),('admin.support','headphones','Support')] %}
       <a href="{{ url_for(endpoint) }}"
@@ -62,6 +72,8 @@
       ('admin.listings',   'package',       'Listings'),
       ('admin.orders',     'shopping-cart', 'Orders'),
       ('admin.wallet',     'credit-card',   'Wallet'),
+      ('admin.disputes',   'alert-triangle','Disputes'),
+      ('admin.payouts',    'send',          'Payouts'),
       ('admin.reports',    'flag',          'Reports'),
       ('admin.analytics',  'bar-chart-2',   'Analytics'),
       ('admin.settings',   'settings',      'Settings'),

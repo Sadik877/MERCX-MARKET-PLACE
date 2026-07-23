@@ -1,0 +1,96 @@
+{% extends 'admin/base.html' %}
+{% block title %}Disputes — Admin{% endblock %}
+{% block page_content %}
+<div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+  <h1 class="font-display text-2xl font-bold">Disputes <span style="color:var(--text-muted);font-weight:400;font-size:1rem">({{ total }})</span></h1>
+</div>
+
+<!-- Summary pills -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+  <div class="stat-pill reveal">
+    <div class="label">Open</div>
+    <div class="value" style="color:var(--danger)">{{ counts.open }}</div>
+    <div class="sub">Awaiting first review</div>
+  </div>
+  <div class="stat-pill reveal">
+    <div class="label">Under Review</div>
+    <div class="value" style="color:var(--warning)">{{ counts.under_review }}</div>
+    <div class="sub">Admin actively investigating</div>
+  </div>
+  <div class="stat-pill reveal">
+    <div class="label">Resolved</div>
+    <div class="value" style="color:var(--success)">{{ counts.resolved }}</div>
+    <div class="sub">Closed with a decision</div>
+  </div>
+</div>
+
+<div class="flex flex-wrap gap-3 mb-5">
+  <div class="tabs" style="border:none;margin:0">
+    {% for s, label in [('','All'),('open','⚠️ Open'),('under_review','🔍 Under Review'),('resolved','✅ Resolved')] %}
+    <a href="{{ url_for('admin.disputes', status=s, q=search, reason=reason) }}" class="tab {% if status == s %}active{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <form action="{{ url_for('admin.disputes') }}" method="GET" class="flex gap-2 ml-auto flex-wrap">
+    <input type="hidden" name="status" value="{{ status }}">
+    <select name="reason" onchange="this.form.submit()" class="input" style="width:auto">
+      <option value="">All Reasons</option>
+      {% for r in ['not_as_described','not_delivered','quality_issue','unauthorized_charge','seller_unresponsive','other'] %}
+      <option value="{{ r }}" {% if reason == r %}selected{% endif %}>{{ r.replace('_',' ')|title }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="q" class="input" style="width:200px" placeholder="Order #, user…" value="{{ search }}">
+    <button type="submit" class="btn btn-ghost btn-sm"><i data-feather="search" style="width:14px;height:14px"></i></button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  {% if disputes %}
+  <div class="table-wrap responsive-cards" style="border:none">
+    <table class="table">
+      <thead><tr>
+        <th>Order</th><th>Raised By</th><th>Against</th><th>Reason</th><th>Amount</th><th>Opened</th><th>Status</th><th>Action</th>
+      </tr></thead>
+      <tbody>
+      {% for d in disputes %}
+      {% set sc = {'open':'danger','under_review':'warning','resolved':'success'} %}
+      <tr>
+        <td data-label="Order">
+          {% if d.order %}
+          <span class="font-mono text-xs" style="color:var(--primary-light)">{{ d.order.order_number }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td data-label="Raised By" style="font-size:.85rem">{{ d.raiser.username if d.raiser else '—' }}</td>
+        <td data-label="Against" style="font-size:.85rem">{{ d.against.username if d.against else '—' }}</td>
+        <td data-label="Reason"><span class="badge badge-neutral">{{ d.reason.replace('_',' ')|title }}</span></td>
+        <td data-label="Amount" class="font-semibold font-mono">{{ '$' + '%.2f'|format(d.resolution_amount|float) if d.resolution_amount else '—' }}</td>
+        <td data-label="Opened" style="color:var(--text-muted);font-size:.82rem">{{ d.created_at[:10] }}</td>
+        <td data-label="Status"><span class="badge badge-{{ sc.get(d.status,'neutral') }}">{{ d.status.replace('_',' ') }}</span></td>
+        <td data-label="Action">
+          <a href="{{ url_for('escrow.dispute_detail', dispute_id=d.id) }}" class="btn btn-ghost btn-sm">
+            <i data-feather="eye" style="width:13px;height:13px"></i> Review
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="flex justify-center p-4">
+    <div class="pagination">
+      {% for p in range(1, pages+1) %}
+      <a href="{{ url_for('admin.disputes', status=status, q=search, reason=reason, page=p) }}"
+         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="alert-triangle" style="width:28px;height:28px"></i></div>
+    <h4>No disputes {{ 'matching your search' if search else ('in this status' if status else 'yet') }}</h4>
+    <p>{{ 'Try a different search term.' if search else ('Try a different filter.' if status else 'Buyer/seller disputes will appear here for review.') }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

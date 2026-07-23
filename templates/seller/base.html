@@ -44,7 +44,9 @@
 
       <div class="sidebar-section mt-3">Finance</div>
       {% set nav_finance = [
-        ('seller.withdrawals',     'credit-card', 'Withdrawals'),
+        ('seller.withdrawals',     'credit-card',   'Withdrawals'),
+        ('escrow.payout_account',  'user-check',    'Payout Accounts'),
+        ('dashboard.purchases',    'alert-triangle','Disputes'),
       ] %}
       {% for endpoint, icon, label in nav_finance %}
       <a href="{{ url_for(endpoint) }}"
@@ -91,6 +93,7 @@
       ('seller.analytics',      'bar-chart-2',   'Analytics'),
       ('seller.reviews',        'star',          'Reviews'),
       ('seller.withdrawals',    'credit-card',   'Withdraw'),
+      ('escrow.payout_account',  'user-check',    'Payouts'),
       ('seller.store_settings', 'settings',      'Settings'),
     ] %}
     {% for endpoint, icon, label in mobile_nav %}

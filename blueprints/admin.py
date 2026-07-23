@@ -1,7 +1,9 @@
 from flask import (Blueprint, render_template, redirect, url_for,
                    request, session, flash, current_app, jsonify)
 from datetime import datetime, timezone
-from utils.supabase_client import (db_select, db_insert, db_update, db_delete)
+from utils.supabase_client import (db_select, db_insert, db_update, db_delete,
+                                   wallet_tx_approve_atomic, wallet_tx_reject_atomic,
+                                   wallet_credit_idempotent, WalletOperationError)
 from utils.decorators import admin_required, super_admin_required
 from utils.helpers import (make_slug, calc_platform_fee, generate_reference, log_audit)
 from utils.email import (send_listing_status, send_withdrawal_processed)
@@ -436,6 +438,13 @@ def refund_order(order_id):
         flash("Order not found.", "danger")
         return redirect(url_for("admin.orders"))
 
+    # Guard against double-submitting the refund form (or two admins
+    # refunding the same order at once): once an order is already
+    # refunded, don't credit the buyer a second time.
+    if order.get("status") == "refunded":
+        flash("This order has already been refunded.", "warning")
+        return redirect(url_for("admin.orders"))
+
     try:
         amount = float(amount)
         assert 0 < amount <= float(order["total"])
@@ -445,20 +454,32 @@ def refund_order(order_id):
 
     buyer = db_select("users", "id,balance,email,username",
                       filters={"id": order["buyer_id"]}, single=True)
-    bal_before = float(buyer["balance"])
-    bal_after  = bal_before + amount
-    db_update("users", {"balance": bal_after}, {"id": buyer["id"]})
-    db_insert("wallet_transactions", {
-        "user_id":        buyer["id"],
-        "type":           "refund",
-        "amount":         amount,
-        "balance_before": bal_before,
-        "balance_after":  bal_after,
-        "reference":      generate_reference("REF"),
-        "status":         "completed",
-        "description":    f"Refund — {order['order_number']}: {reason}",
-        "order_id":       order_id,
-    })
+    if not buyer:
+        flash("Buyer account not found.", "danger")
+        return redirect(url_for("admin.orders"))
+
+    # ATOMICITY FIX: refund credit now goes through the same row-locked,
+    # idempotent RPC used by the payment webhooks, keyed on the order id
+    # so a duplicate request (double-click, retry) can never double-credit
+    # the buyer even if the "already refunded" check above races.
+    try:
+        credit = wallet_credit_idempotent(
+            user_id=buyer["id"],
+            amount=amount,
+            reference=f"REFUND-{order_id}",
+            payment_method="admin_refund",
+            description=f"Refund — {order['order_number']}: {reason}",
+            tx_type="refund",
+        )
+    except WalletOperationError as e:
+        current_app.logger.error(f"refund_order credit failed for {order_id}: {e}")
+        flash("Refund failed while crediting the buyer's wallet. Please try again.", "danger")
+        return redirect(url_for("admin.orders"))
+
+    if credit.get("already_processed"):
+        flash("This order has already been refunded.", "warning")
+        return redirect(url_for("admin.orders"))
+
     db_update("orders", {
         "status":        "refunded",
         "refund_amount": amount,
@@ -509,55 +530,67 @@ def wallet():
 
 def _process_wallet_approval(tx_id, admin_id):
     """Core approval logic shared by the single-item and bulk-action routes.
-    Returns (success: bool, message: str)."""
-    tx = db_select("wallet_transactions", "*", filters={"id": tx_id}, single=True)
-    if not tx or tx["status"] != "pending":
-        return False, "Transaction not found or already processed."
+    Returns (success: bool, message: str).
 
-    user = db_select("users", "id,balance,email,username",
-                     filters={"id": tx["user_id"]}, single=True)
-    bal  = float(user["balance"])
+    ATOMICITY FIX: the balance check + update + ledger update are now
+    performed inside a single row-locked Postgres transaction
+    (wallet_tx_approve_atomic), instead of separate read-then-write
+    REST calls. This closes two race conditions that existed before:
+      1. Two admins (or a bulk-approve + a single approve) clicking
+         "approve" on the same transaction at the same time could
+         both pass the `status == "pending"` check before either
+         write landed, resulting in the transaction being processed
+         twice (double credit / double debit).
+      2. The user's balance could be read here at the same moment a
+         checkout or webhook credit was also reading/writing it,
+         causing one of the two updates to be silently lost.
+    The DB function now locks both the wallet_transactions row and
+    the users row for the duration of the operation, so concurrent
+    calls serialize instead of racing.
+    """
+    try:
+        result = wallet_tx_approve_atomic(tx_id, admin_id)
+    except WalletOperationError as e:
+        current_app.logger.error(f"_process_wallet_approval({tx_id}): {e}")
+        return False, "Transaction could not be processed due to a system error."
 
-    if tx["type"] == "deposit":
-        new_bal = bal + float(tx["amount"])
-        db_update("users", {"balance": new_bal}, {"id": user["id"]})
-        db_update("wallet_transactions", {
-            "status":        "completed",
-            "balance_before": bal,
-            "balance_after": new_bal,
-            "processed_by":  admin_id,
-        }, {"id": tx_id})
+    if not result.get("success"):
+        return False, result.get("message") or "Transaction not found or already processed."
+
+    tx_type = result.get("tx_type")
+    user_id = result.get("user_id")
+    amount  = float(result.get("amount") or 0)
+
+    # Side effects (notifications/emails) are unchanged business logic —
+    # only the financial mutation above was made atomic. These run
+    # after the DB transaction has already committed the balance
+    # change, so a failure here (e.g. email server down) can never
+    # cause a balance mutation to be lost or duplicated.
+    user = db_select("users", "id,email,username", filters={"id": user_id}, single=True)
+    if not user:
+        log_audit(admin_id, f"approve_{tx_type}", resource_id=tx_id)
+        return True, "Transaction approved."
+
+    if tx_type == "deposit":
         db_insert("notifications", {
             "user_id": user["id"], "type": "deposit_approved", "icon": "trending-up",
-            "title": f"Deposit Approved: ${float(tx['amount']):.2f}",
+            "title": f"Deposit Approved: ${amount:.2f}",
             "message": "Your wallet has been funded.",
             "link": "/dashboard/wallet",
         })
         from utils.email import send_deposit_confirmation
-        send_deposit_confirmation(user["email"], user["username"],
-                                  float(tx["amount"]), tx.get("reference", ""))
+        send_deposit_confirmation(user["email"], user["username"], amount, "")
 
-    elif tx["type"] == "withdrawal":
-        if float(tx["amount"]) > bal:
-            return False, "Insufficient user balance to approve withdrawal."
-        new_bal = bal - float(tx["amount"])
-        db_update("users", {"balance": new_bal}, {"id": user["id"]})
-        db_update("wallet_transactions", {
-            "status":        "completed",
-            "balance_before": bal,
-            "balance_after": new_bal,
-            "processed_by":  admin_id,
-        }, {"id": tx_id})
+    elif tx_type == "withdrawal":
         db_insert("notifications", {
             "user_id": user["id"], "type": "withdrawal_approved", "icon": "trending-down",
-            "title": f"Withdrawal Approved: ${float(tx['amount']):.2f}",
+            "title": f"Withdrawal Approved: ${amount:.2f}",
             "message": "Your withdrawal is being processed.",
             "link": "/dashboard/wallet",
         })
-        send_withdrawal_processed(user["email"], user["username"],
-                                  float(tx["amount"]), "approved")
+        send_withdrawal_processed(user["email"], user["username"], amount, "approved")
 
-    log_audit(admin_id, f"approve_{tx['type']}", resource_id=tx_id)
+    log_audit(admin_id, f"approve_{tx_type}", resource_id=tx_id)
     return True, "Transaction approved."
 
 
@@ -600,28 +633,41 @@ def bulk_approve_wallet():
 @admin_required
 def reject_wallet_tx(tx_id):
     note = request.form.get("note", "").strip()
-    tx   = db_select("wallet_transactions", "*", filters={"id": tx_id}, single=True)
-    if not tx or tx["status"] != "pending":
-        flash("Transaction not found or already processed.", "warning")
+
+    # ATOMICITY FIX: rejection now also goes through a row-locked DB
+    # function (wallet_tx_reject_atomic). This closes a race where a
+    # reject and an approve for the same transaction could otherwise
+    # both read status == "pending" and both proceed -- e.g. one admin
+    # rejects a withdrawal at the same instant another approves it,
+    # previously risking either a debited-but-also-refused withdrawal
+    # or a "processed twice" inconsistent state. The lock ensures
+    # whichever action acquires the row first completes, and the
+    # other sees status != "pending" and cleanly no-ops.
+    try:
+        result = wallet_tx_reject_atomic(tx_id, session["user_id"], note)
+    except WalletOperationError as e:
+        current_app.logger.error(f"reject_wallet_tx({tx_id}): {e}")
+        flash("Transaction could not be processed due to a system error.", "danger")
         return redirect(url_for("admin.wallet"))
 
-    db_update("wallet_transactions", {
-        "status":      "cancelled",
-        "admin_note":  note,
-        "processed_by": session["user_id"],
-    }, {"id": tx_id})
+    if not result.get("success"):
+        flash(result.get("message") or "Transaction not found or already processed.", "warning")
+        return redirect(url_for("admin.wallet"))
 
-    user = db_select("users", "email,username", filters={"id": tx["user_id"]}, single=True)
-    if user and tx["type"] == "withdrawal":
-        send_withdrawal_processed(user["email"], user["username"],
-                                  float(tx["amount"]), "rejected", note)
+    tx_type = result.get("tx_type")
+    tx_user_id = result.get("user_id")
+    amount = float(result.get("amount") or 0)
+
+    user = db_select("users", "email,username", filters={"id": tx_user_id}, single=True)
+    if user and tx_type == "withdrawal":
+        send_withdrawal_processed(user["email"], user["username"], amount, "rejected", note)
     db_insert("notifications", {
-        "user_id": tx["user_id"], "type": "tx_rejected", "icon": "x-circle",
-        "title": f"{tx['type'].title()} Rejected",
+        "user_id": tx_user_id, "type": "tx_rejected", "icon": "x-circle",
+        "title": f"{tx_type.title()} Rejected",
         "message": note or "Your request was not approved. Contact support.",
         "link": "/dashboard/wallet",
     })
-    log_audit(session["user_id"], f"reject_{tx['type']}", resource_id=tx_id,
+    log_audit(session["user_id"], f"reject_{tx_type}", resource_id=tx_id,
               details={"note": note})
     flash("Transaction rejected.", "warning")
     return redirect(url_for("admin.wallet"))
@@ -835,3 +881,108 @@ def support():
         u = db_select("users", "id,username,email", filters={"id": t["user_id"]}, single=True)
         t["user"] = u
     return render_template("admin/support.html", tickets=tickets, status=status)
+
+
+# ── Escrow: Disputes ──────────────────────────────────────────
+#
+# Presentation-layer only: filtering/search/pagination added here are
+# plain Python slicing over the same db_select() call the route
+# already made — no new database function, no schema change, no
+# change to how a dispute is actually resolved (that logic still
+# lives entirely in escrow.py / escrow_resolve_dispute()).
+
+@admin_bp.route("/disputes")
+@admin_required
+def disputes():
+    status = request.args.get("status", "")
+    search = request.args.get("q", "").strip().lower()
+    reason = request.args.get("reason", "")
+    page   = int(request.args.get("page", 1))
+
+    filters = {"status": status} if status else {}
+    all_disputes = db_select("disputes", "*", filters=filters, order="-created_at")
+
+    if reason:
+        all_disputes = [d for d in all_disputes if d.get("reason") == reason]
+
+    for d in all_disputes:
+        raiser = db_select("users", "id,username,email", filters={"id": d["raised_by"]}, single=True)
+        against = db_select("users", "id,username,email", filters={"id": d["against_id"]}, single=True)
+        order = db_select("orders", "id,order_number", filters={"id": d["order_id"]}, single=True)
+        d["raiser"] = raiser
+        d["against"] = against
+        d["order"] = order
+
+    if search:
+        def _match(d):
+            hay = " ".join([
+                (d.get("order") or {}).get("order_number") or "",
+                (d.get("raiser") or {}).get("username") or "",
+                (d.get("against") or {}).get("username") or "",
+                d.get("reason") or "",
+            ]).lower()
+            return search in hay
+        all_disputes = [d for d in all_disputes if _match(d)]
+
+    counts = {
+        "open":         len([d for d in all_disputes if d["status"] == "open"]),
+        "under_review": len([d for d in all_disputes if d["status"] == "under_review"]),
+        "resolved":     len([d for d in all_disputes if d["status"] == "resolved"]),
+    }
+
+    per_page  = 20
+    total     = len(all_disputes)
+    start     = (page - 1) * per_page
+    paginated = all_disputes[start: start + per_page]
+    pages     = max(1, -(-total // per_page))
+
+    return render_template("admin/disputes.html", disputes=paginated, status=status,
+        search=search, reason=reason, page=page, pages=pages, total=total, counts=counts)
+
+
+# ── Escrow: Seller Payouts ────────────────────────────────────
+
+@admin_bp.route("/payouts")
+@admin_required
+def payouts():
+    status = request.args.get("status", "pending")
+    search = request.args.get("q", "").strip().lower()
+    method = request.args.get("method", "")
+    page   = int(request.args.get("page", 1))
+
+    filters = {"status": status} if status else {}
+    all_payouts = db_select("payout_requests", "*", filters=filters, order="-requested_at")
+
+    if method:
+        all_payouts = [p for p in all_payouts if p.get("method") == method]
+
+    for p in all_payouts:
+        seller = db_select("users", "id,username,email", filters={"id": p["seller_id"]}, single=True)
+        p["seller"] = seller
+        # payout_history holds the real gateway_reference/failure_reason
+        # for this request (written by payout_request_approve /
+        # payout_request_reject in migrations/002) — payout_requests
+        # itself has no such column, so pull the latest history row
+        # purely for display.
+        history = db_select("payout_history", "*", filters={"payout_request_id": p["id"]},
+                            order="-processed_at", limit=1)
+        p["history"] = history[0] if history else None
+
+    if search:
+        def _match(p):
+            hay = " ".join([
+                (p.get("seller") or {}).get("username") or "",
+                (p.get("seller") or {}).get("email") or "",
+                p.get("reference") or "",
+            ]).lower()
+            return search in hay
+        all_payouts = [p for p in all_payouts if _match(p)]
+
+    per_page  = 20
+    total     = len(all_payouts)
+    start     = (page - 1) * per_page
+    paginated = all_payouts[start: start + per_page]
+    pages     = max(1, -(-total // per_page))
+
+    return render_template("admin/payouts.html", payouts=paginated, status=status,
+        search=search, method=method, page=page, pages=pages, total=total)

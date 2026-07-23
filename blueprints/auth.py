@@ -2,7 +2,8 @@ from flask import (Blueprint, render_template, redirect, url_for,
                    request, session, flash, current_app)
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta, timezone
-from utils.supabase_client import db_select, db_insert, db_update
+from utils.supabase_client import (db_select, db_insert, db_update,
+                                   wallet_credit_idempotent, WalletOperationError)
 from utils.helpers import generate_token, hash_token, generate_referral_code, log_audit
 from utils.email import send_verification_email, send_password_reset_email
 from utils.decorators import guest_only, login_required
@@ -164,22 +165,39 @@ def register():
             bonus = current_app.config.get("REFERRAL_BONUS", 5.0)
             ref_user = db_select("users", "id,balance", filters={"id": referrer_id}, single=True)
             if ref_user:
-                bal_before = float(ref_user["balance"])
-                db_update("users", {"balance": bal_before + bonus}, {"id": referrer_id})
-                bal_after = bal_before + bonus
-                db_insert("wallet_transactions", {
-                    "user_id": referrer_id, "type": "referral",
-                    "amount": bonus, "balance_before": bal_before,
-                    "balance_after": bal_after, "status": "completed",
-                    "description": f"Referral bonus for inviting {username}",
-                })
-                db_update("user_profiles", {"referral_count": 1}, {"user_id": referrer_id})
-                db_insert("notifications", {
-                    "user_id": referrer_id, "type": "referral",
-                    "title": "Referral Bonus!",
-                    "message": f"You earned ${bonus:.2f} for referring {username}!",
-                    "link": "/dashboard/referrals", "icon": "gift",
-                })
+                # ATOMICITY FIX: credit now goes through the same
+                # row-locked, idempotent RPC used by the payment
+                # webhooks, keyed on the new user's id so this can
+                # never double-credit the referrer (e.g. a retried
+                # registration POST after a network hiccup).
+                try:
+                    credit = wallet_credit_idempotent(
+                        user_id=referrer_id,
+                        amount=bonus,
+                        reference=f"REFERRAL-{user['id']}",
+                        payment_method="referral_bonus",
+                        description=f"Referral bonus for inviting {username}",
+                        tx_type="referral",
+                    )
+                except WalletOperationError as e:
+                    current_app.logger.error(f"referral bonus credit failed for {referrer_id}: {e}")
+                    credit = {"already_processed": True}  # skip count/notification below
+
+                if not credit.get("already_processed"):
+                    # BUG FIX: this used to hard-set referral_count to 1,
+                    # wiping out a referrer's count on every subsequent
+                    # referral instead of incrementing it.
+                    profile = db_select("user_profiles", "referral_count",
+                                        filters={"user_id": referrer_id}, single=True)
+                    current_count = (profile or {}).get("referral_count") or 0
+                    db_update("user_profiles", {"referral_count": current_count + 1},
+                             {"user_id": referrer_id})
+                    db_insert("notifications", {
+                        "user_id": referrer_id, "type": "referral",
+                        "title": "Referral Bonus!",
+                        "message": f"You earned ${bonus:.2f} for referring {username}!",
+                        "link": "/dashboard/referrals", "icon": "gift",
+                    })
 
         # Send verification email
         verify_url = url_for("auth.verify_email", token=raw_token, _external=True)

@@ -1,10 +1,11 @@
 {% extends 'dashboard/base.html' %}
-{% block title %}Downloads — MercX Digital{% endblock %}
+{% block title %}My Purchases — MercX Digital{% endblock %}
+
 {% block page_content %}
 <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
   <div>
-    <h1 class="font-display text-2xl font-bold">My Downloads</h1>
-    <p style="color:var(--text-muted);font-size:.88rem">{{ total }} purchase{{ 's' if total != 1 }} · digital files ready to download</p>
+    <h1 class="font-display text-2xl font-bold">My Purchases</h1>
+    <p style="color:var(--text-muted);font-size:.88rem">{{ total }} order{{ 's' if total != 1 }} · downloads, escrow &amp; delivery status</p>
   </div>
   <form action="{{ url_for('dashboard.purchases') }}" method="GET">
     <div style="position:relative">
@@ -13,18 +14,81 @@
     </div>
   </form>
 </div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} mb-4" role="alert">{{ msg }}</div>
+{% endfor %}
+{% endwith %}
+
 {% if orders %}
   {% for order in orders %}
-  <div class="card mb-4 reveal">
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <div>
+  {% set esc = order.escrow %}
+  {% set dispute = order.dispute %}
+
+  <div class="card mb-5 reveal">
+
+    <!-- Order header row -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-4" style="border-bottom:1px solid var(--border)">
+      <div class="flex flex-wrap items-center gap-3">
         <span class="font-mono text-sm font-semibold" style="color:var(--primary-light)">{{ order.order_number }}</span>
-        <span class="ml-3" style="font-size:.8rem;color:var(--text-muted)">{{ order.created_at[:10] }}</span>
+        <span style="font-size:.8rem;color:var(--text-muted)">{{ order.created_at[:10] }}</span>
+
+        <!-- Order status badge -->
+        {% set os = order.status %}
+        {% if os == 'completed' %}
+          <span class="badge badge-success">Completed</span>
+        {% elif os == 'processing' %}
+          <span class="badge" style="background:rgba(6,182,212,.15);color:#06B6D4;border:1px solid rgba(6,182,212,.2)">Processing</span>
+        {% elif os == 'disputed' %}
+          <span class="badge" style="background:rgba(239,68,68,.15);color:#EF4444;border:1px solid rgba(239,68,68,.2)">
+            <i data-feather="alert-triangle" style="width:10px;height:10px;display:inline-block;margin-right:3px"></i>Disputed
+          </span>
+        {% elif os == 'refunded' %}
+          <span class="badge" style="background:rgba(124,58,237,.15);color:#a78bfa;border:1px solid rgba(124,58,237,.2)">Refunded</span>
+        {% else %}
+          <span class="badge">{{ os|title }}</span>
+        {% endif %}
+
+        <!-- Escrow badge -->
+        {% if esc %}
+          {% set es = esc.status %}
+          {% if es == 'held' %}
+            <span class="badge" style="background:rgba(245,158,11,.15);color:#F59E0B;border:1px solid rgba(245,158,11,.2)">
+              <i data-feather="lock" style="width:9px;height:9px;display:inline-block;margin-right:2px"></i>Escrow Held
+            </span>
+          {% elif es == 'delivered' %}
+            <span class="badge" style="background:rgba(6,182,212,.15);color:#06B6D4;border:1px solid rgba(6,182,212,.2)">
+              <i data-feather="package" style="width:9px;height:9px;display:inline-block;margin-right:2px"></i>Delivered
+            </span>
+          {% elif es == 'released' %}
+            <span class="badge badge-success">
+              <i data-feather="check-circle" style="width:9px;height:9px;display:inline-block;margin-right:2px"></i>Released
+            </span>
+          {% elif es == 'refunded' %}
+            <span class="badge" style="background:rgba(124,58,237,.15);color:#a78bfa;border:1px solid rgba(124,58,237,.2)">Refunded</span>
+          {% elif es == 'disputed' %}
+            <span class="badge" style="background:rgba(239,68,68,.15);color:#EF4444;border:1px solid rgba(239,68,68,.2)">Frozen</span>
+          {% endif %}
+        {% endif %}
+
+        <!-- Payment badge -->
+        {% if esc and esc.payment_method %}
+          <span class="badge" style="background:rgba(148,163,184,.1);color:var(--text-muted);border:1px solid var(--border);font-size:.65rem">
+            {{ esc.payment_method|replace('_',' ')|upper }}
+          </span>
+        {% endif %}
       </div>
-      <span class="badge badge-success">Completed</span>
+
+      <!-- Total -->
+      {% if esc %}
+      <span class="font-bold" style="color:var(--primary-light)">${{ '%.2f'|format(esc.amount|float) }}</span>
+      {% endif %}
     </div>
+
+    <!-- Items -->
     {% for item in order['items'] %}
-    <div class="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl mb-2"
+    <div class="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl mb-3"
          style="background:var(--bg-surface);border:1px solid var(--border)">
       <div class="flex items-center gap-4">
         <div class="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -37,8 +101,25 @@
             {{ item.license_type|default('Personal',true)|title }} License ·
             {{ item.download_count or 0 }}/{{ item.max_downloads or 5 }} downloads used
           </div>
+          <!-- Delivery status -->
+          {% set ds = item.delivery_status %}
+          {% if ds == 'pending' %}
+            <div class="flex items-center gap-1 mt-1" style="font-size:.75rem;color:#F59E0B">
+              <i data-feather="clock" style="width:11px;height:11px"></i> Awaiting delivery from seller
+            </div>
+          {% elif ds == 'delivered' %}
+            <div class="flex items-center gap-1 mt-1" style="font-size:.75rem;color:#10B981">
+              <i data-feather="check" style="width:11px;height:11px"></i> Delivered
+            </div>
+          {% endif %}
+          <!-- Refund status -->
+          {% if item.refund_status %}
+            <div class="flex items-center gap-1 mt-1" style="font-size:.75rem;color:#a78bfa">
+              <i data-feather="rotate-ccw" style="width:11px;height:11px"></i> Refund: {{ item.refund_status|title }}
+            </div>
+          {% endif %}
           {% if item.download_expires_at %}
-          <div style="font-size:.75rem;color:var(--warning)">
+          <div style="font-size:.75rem;color:var(--warning)" class="mt-1">
             <i data-feather="clock" style="width:11px;height:11px;display:inline"></i>
             Expires {{ item.download_expires_at[:10] }}
           </div>
@@ -46,24 +127,114 @@
         </div>
       </div>
       <div class="flex items-center gap-2">
-        {% if item.delivery_status == 'delivered' and item.download_url %}
+        {% if ds == 'delivered' and item.download_url %}
           {% if (item.download_count or 0) < (item.max_downloads or 5) %}
-          <a href="{{ url_for('dashboard.download_item', order_item_id=item.id) }}"
-             class="btn btn-primary btn-sm">
+          <a href="{{ url_for('dashboard.download_item', order_item_id=item.id) }}" class="btn btn-primary btn-sm">
             <i data-feather="download" style="width:14px;height:14px"></i> Download
           </a>
           {% else %}
           <span class="badge badge-warning">Limit reached</span>
           {% endif %}
-        {% elif item.delivery_status == 'pending' %}
-          <span class="badge badge-warning"><i data-feather="clock" style="width:11px;height:11px"></i> Pending delivery</span>
+        {% elif ds == 'pending' %}
+          <span class="badge badge-warning"><i data-feather="clock" style="width:11px;height:11px"></i> Pending</span>
         {% endif %}
         <span class="font-semibold" style="color:var(--primary-light)">${{ '%.2f'|format(item.unit_price|float) }}</span>
       </div>
     </div>
     {% endfor %}
-  </div>
+
+    <!-- Escrow timeline + actions -->
+    {% if esc %}
+    <div class="mt-2 p-4 rounded-xl" style="background:rgba(124,58,237,.04);border:1px solid rgba(124,58,237,.12)">
+      <div class="text-xs font-semibold mb-3 flex items-center gap-2" style="color:var(--text-muted)">
+        <i data-feather="git-commit" style="width:12px;height:12px"></i> ESCROW TIMELINE
+      </div>
+
+      <!-- Timeline steps -->
+      <div class="flex flex-wrap gap-0" style="position:relative">
+        {% set steps = [
+          ('payment_captured', 'credit-card', 'Paid', True),
+          ('held', 'lock', 'Held', esc.status in ('held','delivered','released','refunded','disputed')),
+          ('delivered', 'package', 'Delivered', esc.status in ('delivered','released','refunded')),
+          ('released', 'check-circle', 'Released', esc.status in ('released','refunded')),
+        ] %}
+        {% for key, icon, label, done in steps %}
+        <div class="flex items-center">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center"
+                 style="background:{% if done %}rgba(16,185,129,.2){% else %}var(--bg-surface){% endif %};border:1.5px solid {% if done %}#10B981{% else %}var(--border){% endif %}">
+              <i data-feather="{{ icon }}" style="width:12px;height:12px;color:{% if done %}#10B981{% else %}var(--text-muted){% endif %}"></i>
+            </div>
+            <div class="text-xs mt-1 text-center" style="color:{% if done %}var(--text){% else %}var(--text-muted){% endif %};font-size:.65rem;white-space:nowrap">{{ label }}</div>
+          </div>
+          {% if not loop.last %}
+          <div style="height:1.5px;width:2.5rem;background:{% if done %}#10B981{% else %}var(--border){% endif %};margin:0 .25rem;margin-bottom:1.1rem"></div>
+          {% endif %}
+        </div>
+        {% endfor %}
+
+        <!-- Disputed branch -->
+        {% if esc.status == 'disputed' %}
+        <div class="flex items-center ml-3">
+          <div style="height:1.5px;width:1.5rem;background:#EF4444;margin:0 .25rem;margin-bottom:1.1rem"></div>
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background:rgba(239,68,68,.2);border:1.5px solid #EF4444">
+              <i data-feather="alert-triangle" style="width:12px;height:12px;color:#EF4444"></i>
+            </div>
+            <div class="text-xs mt-1 text-center" style="color:#EF4444;font-size:.65rem">Disputed</div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Auto-release countdown (shown when delivered and not yet released/disputed) -->
+      {% if esc.status == 'delivered' and esc.auto_release_at %}
+      <div class="mt-3 flex items-center gap-2 text-xs" style="color:#06B6D4">
+        <i data-feather="clock" style="width:12px;height:12px"></i>
+        Auto-release in:
+        <span class="font-mono font-bold countdown-timer" data-release="{{ esc.auto_release_at }}">—</span>
+      </div>
+      {% endif %}
+
+      <!-- Action buttons -->
+      <div class="flex flex-wrap gap-2 mt-3">
+
+        <!-- Confirm Receipt -->
+        {% if esc.status in ('held', 'delivered') and order.status not in ('disputed', 'refunded') %}
+        <form action="{{ url_for('escrow.confirm_receipt', order_id=order.id) }}" method="POST"
+              onsubmit="return confirm('Confirm you received this order and release payment to the seller?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#10B981;border:1px solid rgba(16,185,129,.3);font-size:.75rem">
+            <i data-feather="check-circle" style="width:12px;height:12px"></i> Confirm Receipt
+          </button>
+        </form>
+        {% endif %}
+
+        <!-- Open Dispute -->
+        {% if esc.status in ('held', 'delivered') and order.status not in ('disputed', 'completed', 'refunded') and not dispute %}
+        <button onclick="openDisputeModal('{{ order.id }}', '{{ order.order_number }}')"
+                class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#EF4444;border:1px solid rgba(239,68,68,.2);font-size:.75rem">
+          <i data-feather="alert-triangle" style="width:12px;height:12px"></i> Open Dispute
+        </button>
+        {% endif %}
+
+        <!-- View Dispute -->
+        {% if dispute %}
+        <a href="{{ url_for('escrow.dispute_detail', dispute_id=dispute.id) }}"
+           class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#EF4444;border:1px solid rgba(239,68,68,.2);font-size:.75rem">
+          <i data-feather="message-square" style="width:12px;height:12px"></i>
+          View Dispute
+          <span class="badge ml-1" style="font-size:.6rem;background:rgba(239,68,68,.2);color:#EF4444;border:none">{{ dispute.status|replace('_',' ')|title }}</span>
+        </a>
+        {% endif %}
+
+      </div><!-- /actions -->
+    </div><!-- /escrow block -->
+    {% endif %}
+
+  </div><!-- /order card -->
   {% endfor %}
+
   {% if pages > 1 %}
   <div class="flex justify-center mt-4">
     <div class="pagination">
@@ -78,12 +249,84 @@
 <div class="card">
   <div class="empty-state">
     <div class="icon-wrap"><i data-feather="download-cloud" style="width:28px;height:28px"></i></div>
-    <h4>{{ 'No downloads matching your search' if search else 'No downloads yet' }}</h4>
-    <p>{{ 'Try a different search term.' if search else 'Purchase digital products to find your downloads here.' }}</p>
+    <h4>{{ 'No orders matching your search' if search else 'No purchases yet' }}</h4>
+    <p>{{ 'Try a different search term.' if search else 'Purchase digital products to see your downloads and escrow here.' }}</p>
     {% if not search %}
     <a href="{{ url_for('marketplace.index') }}" class="btn btn-primary mt-3">Browse Marketplace</a>
     {% endif %}
   </div>
 </div>
 {% endif %}
+
+<!-- ── Dispute Modal ──────────────────────────────────────────── -->
+<div id="dispute-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.7);padding:1rem">
+  <div class="card" style="width:100%;max-width:480px">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-display font-bold text-lg" style="color:#EF4444">Open a Dispute</h2>
+      <button onclick="document.getElementById('dispute-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:var(--text-muted)">
+        <i data-feather="x" style="width:18px;height:18px"></i>
+      </button>
+    </div>
+    <p class="text-sm mb-4" style="color:var(--text-muted)">
+      Funds will be frozen until admin resolves your case. Only open a dispute if you have a genuine issue.
+    </p>
+    <form id="dispute-form" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Order</label>
+        <div id="dispute-order-label" class="text-sm font-mono" style="color:var(--primary-light)"></div>
+      </div>
+      <div class="mb-3">
+        <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Reason <span style="color:#EF4444">*</span></label>
+        <select name="reason" class="input w-full text-sm">
+          <option value="not_delivered">Not delivered</option>
+          <option value="not_as_described">Not as described</option>
+          <option value="quality_issue">Quality issue</option>
+          <option value="unauthorized_charge">Unauthorized charge</option>
+          <option value="seller_unresponsive">Seller unresponsive</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="mb-4">
+        <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Description <span style="color:#EF4444">*</span></label>
+        <textarea name="description" rows="4" class="input w-full text-sm" placeholder="Describe what happened in detail…" style="resize:vertical" required minlength="20"></textarea>
+      </div>
+      <div class="flex gap-3">
+        <button type="button" onclick="document.getElementById('dispute-modal').style.display='none'"
+                class="btn flex-1" style="background:var(--bg-surface);border:1px solid var(--border)">Cancel</button>
+        <button type="submit" class="btn flex-1" style="background:#EF4444;color:#fff;font-weight:700">
+          <i data-feather="alert-triangle" style="width:14px;height:14px"></i> Submit Dispute
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openDisputeModal(orderId, orderNum) {
+  document.getElementById('dispute-form').action = '/orders/' + orderId + '/dispute';
+  document.getElementById('dispute-order-label').textContent = orderNum;
+  document.getElementById('dispute-modal').style.display = 'flex';
+  if (window.feather) feather.replace();
+}
+document.getElementById('dispute-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
+// Auto-release countdown timers
+document.querySelectorAll('.countdown-timer').forEach(function(el) {
+  const releaseAt = new Date(el.dataset.release);
+  function update() {
+    const diff = releaseAt - new Date();
+    if (diff <= 0) { el.textContent = 'Auto-releasing…'; return; }
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    el.textContent = (d > 0 ? d + 'd ' : '') + h + 'h ' + m + 'm';
+  }
+  update();
+  setInterval(update, 60000);
+});
+</script>
 {% endblock %}

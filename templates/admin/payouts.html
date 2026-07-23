@@ -1,0 +1,120 @@
+{% extends 'admin/base.html' %}
+{% block title %}Seller Payouts — Admin{% endblock %}
+{% block page_content %}
+<div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+  <h1 class="font-display text-2xl font-bold">Seller Payouts <span style="color:var(--text-muted);font-weight:400;font-size:1rem">({{ total }})</span></h1>
+</div>
+
+<div class="flex flex-wrap gap-3 mb-5">
+  <div class="tabs" style="border:none;margin:0">
+    {% for s, label in [('pending','⏳ Pending'),('paid','✅ Paid'),('rejected','❌ Rejected'),('','All')] %}
+    <a href="{{ url_for('admin.payouts', status=s, q=search, method=method) }}" class="tab {% if status == s %}active{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <form action="{{ url_for('admin.payouts') }}" method="GET" class="flex gap-2 ml-auto flex-wrap">
+    <input type="hidden" name="status" value="{{ status }}">
+    <select name="method" onchange="this.form.submit()" class="input" style="width:auto">
+      <option value="">All Methods</option>
+      {% for m in ['bank_transfer','paystack','flutterwave','stripe','paypal','crypto'] %}
+      <option value="{{ m }}" {% if method == m %}selected{% endif %}>{{ m.replace('_',' ')|title }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="q" class="input" style="width:200px" placeholder="Seller, reference…" value="{{ search }}">
+    <button type="submit" class="btn btn-ghost btn-sm"><i data-feather="search" style="width:14px;height:14px"></i></button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  {% if payouts %}
+  <div class="table-wrap responsive-cards" style="border:none">
+    <table class="table">
+      <thead><tr>
+        <th>Seller</th><th>Amount</th><th>Method</th><th>Gateway Ref</th><th>Reference</th><th>Requested</th><th>Status</th><th>Action</th>
+      </tr></thead>
+      <tbody>
+      {% for p in payouts %}
+      {% set sc = {'pending':'warning','approved':'accent','processing':'accent','paid':'success','rejected':'danger','failed':'danger'} %}
+      <tr>
+        <td data-label="Seller">
+          <div class="font-semibold text-sm">{{ p.seller.username if p.seller else '—' }}</div>
+          <div style="font-size:.72rem;color:var(--text-dim)">{{ p.seller.email if p.seller else '' }}</div>
+          {% if p.destination %}
+          <button type="button" onclick="document.getElementById('dest-{{ p.id }}').classList.toggle('hidden')"
+                  style="font-size:.7rem;color:#a78bfa;background:none;border:none;cursor:pointer;padding:0;margin-top:.2rem">
+            View destination
+          </button>
+          <div id="dest-{{ p.id }}" class="hidden" style="font-size:.72rem;color:var(--text-dim);margin-top:.3rem;line-height:1.5">
+            {% for k, v in p.destination.items() %}
+              {% if v %}<div><span style="color:var(--text-dim)">{{ k.replace('_',' ')|title }}:</span> {{ v }}</div>{% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+        </td>
+        <td data-label="Amount" class="font-semibold font-mono">${{ '%.2f'|format(p.amount|float) }}</td>
+        <td data-label="Method"><span class="badge badge-neutral">{{ p.method.replace('_',' ')|title }}</span></td>
+        <td data-label="Gateway Ref" style="font-size:.72rem;color:var(--text-dim);font-family:monospace">
+          {{ p.history.gateway_reference if p.history and p.history.gateway_reference else '—' }}
+        </td>
+        <td data-label="Transaction ID" style="font-size:.75rem;color:var(--text-dim);font-family:monospace">{{ p.reference or '—' }}</td>
+        <td data-label="Requested" style="color:var(--text-muted);font-size:.82rem">{{ p.requested_at[:16].replace('T',' ') if p.requested_at else '—' }}</td>
+        <td data-label="Status"><span class="badge badge-{{ sc.get(p.status,'neutral') }}">{{ p.status }}</span></td>
+        <td data-label="Action">
+          {% if p.status == 'pending' %}
+          <div class="flex gap-1 flex-wrap">
+            <button onclick="document.getElementById('approve-{{ p.id }}').classList.toggle('hidden')"
+                    class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">
+              <i data-feather="check" style="width:13px;height:13px"></i> Approve
+            </button>
+            <button onclick="document.getElementById('reject-{{ p.id }}').classList.toggle('hidden')"
+                    class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#FCA5A5;border:1px solid rgba(239,68,68,.3)">
+              <i data-feather="x" style="width:13px;height:13px"></i> Reject
+            </button>
+          </div>
+          <div id="approve-{{ p.id }}" class="hidden mt-2">
+            <form method="POST" action="{{ url_for('escrow.admin_approve_payout', payout_id=p.id) }}" class="flex flex-col gap-2" style="min-width:220px">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label class="flex items-center gap-2 cursor-pointer" style="font-size:.78rem;color:var(--text-muted)">
+                <input type="checkbox" name="send_via_gateway" value="1" class="w-4 h-4" style="accent-color:var(--primary)">
+                Dispatch via {{ p.method.replace('_',' ')|title }} gateway
+              </label>
+              <input type="text" name="gateway_reference" class="input" style="width:100%" placeholder="Gateway reference (optional)">
+              <button type="submit" class="btn btn-sm" style="background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)">Confirm Approval</button>
+            </form>
+          </div>
+          <div id="reject-{{ p.id }}" class="hidden mt-2">
+            <form method="POST" action="{{ url_for('escrow.admin_reject_payout', payout_id=p.id) }}" class="flex gap-2" style="min-width:220px">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="text" name="note" class="input" style="width:140px" placeholder="Reason" required>
+              <button type="submit" class="btn btn-danger btn-sm">Reject</button>
+            </form>
+          </div>
+          {% else %}
+          <span style="font-size:.78rem;color:var(--text-dim)">
+            {{ p.processed_at[:10] if p.processed_at else '—' }}
+          </span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="flex justify-center p-4">
+    <div class="pagination">
+      {% for p in range(1, pages+1) %}
+      <a href="{{ url_for('admin.payouts', status=status, q=search, method=method, page=p) }}"
+         class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="trending-down" style="width:28px;height:28px"></i></div>
+    <h4>No payouts {{ 'matching your search' if search else ('in this status' if status else 'yet') }}</h4>
+    <p>{{ 'Try a different search term.' if search else ('Try a different filter.' if status else 'Seller payout requests will appear here.') }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

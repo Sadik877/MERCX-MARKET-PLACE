@@ -136,6 +136,11 @@ def db_rpc(fn: str, params: dict | None = None):
         return None
 
 
+class WalletOperationError(Exception):
+    """Raised when an atomic wallet RPC call fails unexpectedly."""
+    pass
+
+
 # ── Storage helpers ───────────────────────────────────────────
 
 def storage_upload(bucket: str, path: str, file_bytes: bytes,
@@ -167,3 +172,257 @@ def storage_signed_url(bucket: str, path: str, expires_in: int = 3600) -> str | 
     except Exception as e:
         current_app.logger.error(f"storage_signed_url({path}): {e}")
         return None
+
+
+# ── Atomic wallet operations ──────────────────────────────────
+#
+# These wrap the Postgres functions defined in
+# migrations/001_atomic_wallet_functions.sql. Unlike db_rpc() above,
+# these do NOT swallow exceptions into a generic None/[] return —
+# callers need to know unambiguously whether the atomic operation
+# succeeded, so failures are raised as WalletOperationError for the
+# blueprint to handle explicitly (instead of silently proceeding as
+# if a balance mutation happened when it didn't).
+
+def _call_rpc_single(fn: str, params: dict) -> dict:
+    """Call an RPC that returns a single-row table result and return
+    that row as a dict. Raises WalletOperationError on any failure
+    (network, DB exception, or empty/malformed result) so financial
+    code paths never silently continue on an ambiguous result."""
+    try:
+        res = get_supabase().rpc(fn, params).execute()
+    except Exception as e:
+        current_app.logger.error(f"wallet rpc {fn} failed: {e}")
+        raise WalletOperationError(f"{fn} failed: {e}") from e
+
+    data = res.data
+    if not data:
+        raise WalletOperationError(f"{fn} returned no data")
+    # Supabase RPCs returning TABLE(...) come back as a list of rows.
+    row = data[0] if isinstance(data, list) else data
+    return row
+
+
+def wallet_credit_idempotent(user_id, amount, reference, payment_method,
+                              description, tx_type: str = "deposit") -> dict:
+    """Atomically credit a user's wallet, or no-op if `reference` was
+    already processed. Returns dict with keys: tx_id,
+    already_processed, balance_before, balance_after."""
+    return _call_rpc_single("wallet_credit_idempotent", {
+        "p_user_id": str(user_id),
+        "p_amount": float(amount),
+        "p_reference": reference,
+        "p_payment_method": payment_method,
+        "p_description": description,
+        "p_type": tx_type,
+    })
+
+
+def wallet_debit_atomic(user_id, amount, reference, description,
+                         order_id=None, tx_type: str = "purchase") -> dict:
+    """Atomically debit a user's wallet if sufficient balance exists.
+    Returns dict with keys: tx_id, success, balance_before,
+    balance_after. `success=False` means insufficient balance (or a
+    prior identical reference already applied) — not an exception."""
+    return _call_rpc_single("wallet_debit_atomic", {
+        "p_user_id": str(user_id),
+        "p_amount": float(amount),
+        "p_reference": reference,
+        "p_description": description,
+        "p_order_id": str(order_id) if order_id else None,
+        "p_type": tx_type,
+    })
+
+
+def checkout_wallet_debit_atomic(user_id, amount, reference, description) -> dict:
+    """Atomically debit a buyer's wallet for a checkout, idempotent on
+    `reference`. Returns dict with keys: tx_id, success, already_done,
+    balance_before, balance_after."""
+    return _call_rpc_single("checkout_wallet_debit_atomic", {
+        "p_user_id": str(user_id),
+        "p_amount": float(amount),
+        "p_reference": reference,
+        "p_description": description,
+    })
+
+
+def wallet_tx_approve_atomic(tx_id, admin_id) -> dict:
+    """Atomically approve a pending deposit/withdrawal transaction,
+    with row locking so it cannot be double-approved concurrently.
+    Returns dict with keys: success, message, tx_type, user_id, amount."""
+    return _call_rpc_single("wallet_tx_approve_atomic", {
+        "p_tx_id": str(tx_id),
+        "p_admin_id": str(admin_id),
+    })
+
+
+def wallet_tx_reject_atomic(tx_id, admin_id, note: str = "") -> dict:
+    """Atomically reject a pending transaction, with the same row
+    locking guarantee as wallet_tx_approve_atomic."""
+    return _call_rpc_single("wallet_tx_reject_atomic", {
+        "p_tx_id": str(tx_id),
+        "p_admin_id": str(admin_id),
+        "p_note": note,
+    })
+
+
+def increment_listing_views(listing_id) -> None:
+    """Atomically increment a listing's view counter (no lost updates
+    under concurrent page views)."""
+    try:
+        get_supabase().rpc("increment_listing_views",
+                            {"p_listing_id": str(listing_id)}).execute()
+    except Exception as e:
+        current_app.logger.error(f"increment_listing_views({listing_id}): {e}")
+
+
+def increment_download_count_atomic(order_item_id) -> dict:
+    """Atomically check-and-increment an order item's download count.
+    Returns dict with keys: allowed, new_count, max_downloads."""
+    return _call_rpc_single("increment_download_count_atomic", {
+        "p_order_item_id": str(order_item_id),
+    })
+
+
+# ── Escrow operations ──────────────────────────────────────────
+#
+# These wrap the Postgres functions defined in
+# migrations/002_escrow_system.sql. Same contract as the wallet
+# helpers above: failures raise WalletOperationError rather than
+# returning an ambiguous None, since these all move money.
+
+def escrow_hold_create(order_id, buyer_id, seller_id, amount, platform_fee,
+                        seller_earnings, payment_method, payment_reference,
+                        instant_delivery: bool = False,
+                        auto_release_hours: int = 72) -> dict:
+    """Create the escrow hold for a newly-paid order. Idempotent on
+    order_id/payment_reference. Returns dict with keys: escrow_id,
+    already_processed, status."""
+    return _call_rpc_single("escrow_hold_create", {
+        "p_order_id": str(order_id),
+        "p_buyer_id": str(buyer_id),
+        "p_seller_id": str(seller_id),
+        "p_amount": float(amount),
+        "p_platform_fee": float(platform_fee),
+        "p_seller_earnings": float(seller_earnings),
+        "p_payment_method": payment_method,
+        "p_payment_reference": payment_reference,
+        "p_instant_delivery": bool(instant_delivery),
+        "p_auto_release_hours": int(auto_release_hours),
+    })
+
+
+def escrow_mark_delivered(escrow_id, seller_id, auto_release_hours: int = 72) -> dict:
+    """Seller marks the order delivered; starts the auto-release
+    countdown. Returns dict with keys: success, message."""
+    return _call_rpc_single("escrow_mark_delivered", {
+        "p_escrow_id": str(escrow_id),
+        "p_seller_id": str(seller_id),
+        "p_auto_release_hours": int(auto_release_hours),
+    })
+
+
+def escrow_release(escrow_id, actor_id, reason: str = "buyer_confirmed") -> dict:
+    """Release held funds to the seller (buyer confirmation or
+    system auto-release). Returns dict with keys: success,
+    already_processed, seller_id, amount, message."""
+    return _call_rpc_single("escrow_release", {
+        "p_escrow_id": str(escrow_id),
+        "p_actor_id": str(actor_id) if actor_id else None,
+        "p_reason": reason,
+    })
+
+
+def escrow_auto_release_due() -> list:
+    """Release every escrow past its auto-release deadline. Returns a
+    list of dicts with keys: escrow_id, success, message. Safe to
+    call repeatedly (e.g. from a scheduler) — already-released rows
+    are simply not selected."""
+    try:
+        res = get_supabase().rpc("escrow_auto_release_due", {}).execute()
+        return res.data or []
+    except Exception as e:
+        current_app.logger.error(f"escrow_auto_release_due failed: {e}")
+        raise WalletOperationError(f"escrow_auto_release_due failed: {e}") from e
+
+
+def escrow_open_dispute(escrow_id, raised_by, reason, description: str = None) -> dict:
+    """Open a dispute against an escrow transaction, freezing its
+    funds. Returns dict with keys: dispute_id, success, message."""
+    return _call_rpc_single("escrow_open_dispute", {
+        "p_escrow_id": str(escrow_id),
+        "p_raised_by": str(raised_by),
+        "p_reason": reason,
+        "p_description": description,
+    })
+
+
+def escrow_resolve_dispute(dispute_id, admin_id, resolution: str,
+                            refund_amount: float = None, note: str = None) -> dict:
+    """Admin resolves a dispute. `resolution` is one of
+    'refund_buyer', 'release_seller', 'partial_refund'
+    (partial_refund requires refund_amount). Returns dict with keys:
+    success, message."""
+    return _call_rpc_single("escrow_resolve_dispute", {
+        "p_dispute_id": str(dispute_id),
+        "p_admin_id": str(admin_id),
+        "p_resolution": resolution,
+        "p_refund_amount": float(refund_amount) if refund_amount is not None else None,
+        "p_note": note,
+    })
+
+
+# ── Seller payout operations ───────────────────────────────────
+
+def payout_request_approve(payout_id, admin_id, gateway_reference: str = None) -> dict:
+    """Approve and pay out a pending seller payout request. Returns
+    dict with keys: success, message."""
+    return _call_rpc_single("payout_request_approve_atomic", {
+        "p_payout_id": str(payout_id),
+        "p_admin_id": str(admin_id),
+        "p_gateway_reference": gateway_reference,
+    })
+
+
+def payout_request_reject(payout_id, admin_id, note: str = "") -> dict:
+    """Reject a pending seller payout request (no funds move).
+    Returns dict with keys: success, message."""
+    return _call_rpc_single("payout_request_reject_atomic", {
+        "p_payout_id": str(payout_id),
+        "p_admin_id": str(admin_id),
+        "p_note": note,
+    })
+
+
+# ── Webhook replay protection ──────────────────────────────────
+
+def webhook_event_record(gateway: str, event_id: str, event_type: str,
+                          payload: dict, signature_valid: bool) -> dict:
+    """Log an inbound webhook delivery before processing it. Returns
+    dict with keys: is_new, id, was_processed.
+    - is_new=True: never seen before, process it.
+    - is_new=False, was_processed=True: true replay of a delivery that
+      already completed successfully — skip reprocessing entirely.
+    - is_new=False, was_processed=False: seen before but the previous
+      attempt errored out — safe to retry (downstream idempotency
+      references still prevent any double-credit)."""
+    return _call_rpc_single("webhook_event_record", {
+        "p_gateway": gateway,
+        "p_event_id": event_id,
+        "p_event_type": event_type,
+        "p_payload": payload,
+        "p_signature_valid": signature_valid,
+    })
+
+
+def webhook_event_mark_processed(webhook_event_id, error: str = None) -> None:
+    """Mark a logged webhook delivery as processed (or failed with
+    `error` set). Best-effort — failures here are logged but never
+    raised, since the business-logic outcome already happened."""
+    try:
+        get_supabase().rpc("webhook_event_mark_processed", {
+            "p_id": str(webhook_event_id),
+            "p_error": error,
+        }).execute()
+    except Exception as e:
+        current_app.logger.error(f"webhook_event_mark_processed({webhook_event_id}): {e}")

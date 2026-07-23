@@ -1,7 +1,9 @@
 import hmac, hashlib, json
 from flask import Blueprint, request, jsonify, session, current_app
 from utils.supabase_client import (db_select, db_insert, db_update,
-                                   db_delete, db_upsert)
+                                   db_delete, db_upsert,
+                                   wallet_credit_idempotent, WalletOperationError,
+                                   webhook_event_record, webhook_event_mark_processed)
 from utils.decorators import api_login_required
 from utils.helpers import generate_reference, calc_platform_fee
 
@@ -215,24 +217,57 @@ def stripe_webhook():
     except Exception:
         return jsonify({"error": "Invalid signature"}), 400
 
+    # REPLAY PROTECTION: log this delivery under Stripe's own event id
+    # (unique per event, stable across retries) before doing anything
+    # else. If we've already logged this exact event id, Stripe is
+    # retrying a delivery we already handled (or something is replaying
+    # a captured request) — acknowledge and stop, without touching the
+    # wallet idempotency layer at all.
+    try:
+        log = webhook_event_record("stripe", event["id"], event["type"], event, True)
+    except WalletOperationError as e:
+        current_app.logger.error(f"stripe_webhook: failed to log delivery {event['id']}: {e}")
+        return jsonify({"error": "Logging failed"}), 500
+
+    if not log.get("is_new") and log.get("was_processed"):
+        current_app.logger.info(f"stripe_webhook: replay of already-processed event {event['id']}, skipped")
+        return jsonify({"received": True, "replay": True})
+
+    error = None
     if event["type"] == "payment_intent.succeeded":
         pi   = event["data"]["object"]
         meta = pi.get("metadata", {})
         uid  = meta.get("user_id")
         if uid:
             amount = pi["amount_received"] / 100
-            user   = db_select("users", "id,balance", filters={"id": uid}, single=True)
-            if user:
-                bal_before = float(user["balance"])
-                bal_after  = bal_before + amount
-                db_update("users", {"balance": bal_after}, {"id": uid})
-                db_insert("wallet_transactions", {
-                    "user_id": uid, "type": "deposit", "amount": amount,
-                    "balance_before": bal_before, "balance_after": bal_after,
-                    "reference": pi["id"], "status": "completed",
-                    "payment_method": "stripe",
-                    "description": "Wallet deposit via Stripe",
-                })
+            # Idempotent + atomic: uses pi["id"] (Stripe's unique payment
+            # intent id) as the dedup reference. If this webhook fires
+            # more than once for the same event (Stripe explicitly
+            # documents this can happen), the wallet is only ever
+            # credited once. The row-locked DB function also prevents
+            # this credit from racing with a concurrent checkout debit
+            # or admin approval for the same user.
+            try:
+                result = wallet_credit_idempotent(
+                    user_id=uid,
+                    amount=amount,
+                    reference=pi["id"],
+                    payment_method="stripe",
+                    description="Wallet deposit via Stripe",
+                    tx_type="deposit",
+                )
+                if result.get("already_processed"):
+                    current_app.logger.info(
+                        f"stripe_webhook: duplicate delivery for {pi['id']}, skipped re-credit")
+            except WalletOperationError as e:
+                current_app.logger.error(f"stripe_webhook credit failed for {uid}: {e}")
+                error = str(e)
+
+    webhook_event_mark_processed(log["id"], error=error)
+    if error:
+        # Return 500 so Stripe retries later rather than silently
+        # losing the credit.
+        return jsonify({"error": "Processing failed"}), 500
     return jsonify({"received": True})
 
 
@@ -247,23 +282,55 @@ def paystack_webhook():
 
     data  = request.get_json(silent=True) or {}
     event = data.get("event")
+
+    # REPLAY PROTECTION: Paystack doesn't send a dedicated "event id"
+    # header, so we key on the transaction reference (falling back to
+    # the provider transaction id) plus the event type — this is
+    # stable across Paystack's documented retries for the same event.
+    event_key = (data.get("data", {}).get("reference")
+                 or str(data.get("data", {}).get("id") or "")
+                 or "unknown")
+    try:
+        log = webhook_event_record("paystack", f"{event}:{event_key}", event, data, True)
+    except WalletOperationError as e:
+        current_app.logger.error(f"paystack_webhook: failed to log delivery {event_key}: {e}")
+        return jsonify({"error": "Logging failed"}), 500
+
+    if not log.get("is_new") and log.get("was_processed"):
+        current_app.logger.info(f"paystack_webhook: replay of already-processed event {event_key}, skipped")
+        return jsonify({"status": "ok", "replay": True})
+
+    error = None
     if event == "charge.success":
         meta   = data.get("data", {}).get("metadata", {})
         uid    = meta.get("user_id")
         amount = (data.get("data", {}).get("amount", 0)) / 100
+        # Reference MUST come from Paystack's own transaction reference
+        # whenever present -- falling back to a freshly generated one
+        # would defeat idempotency (every retry would generate a new
+        # reference and re-credit). generate_reference() is only used
+        # as a last resort if Paystack didn't send one at all.
+        reference = data.get("data", {}).get("reference") or generate_reference("PSK")
         if uid and amount:
-            user = db_select("users", "id,balance", filters={"id": uid}, single=True)
-            if user:
-                bal_before = float(user["balance"])
-                bal_after  = bal_before + amount
-                db_update("users", {"balance": bal_after}, {"id": uid})
-                db_insert("wallet_transactions", {
-                    "user_id": uid, "type": "deposit", "amount": amount,
-                    "balance_before": bal_before, "balance_after": bal_after,
-                    "reference": data.get("data", {}).get("reference", generate_reference("PSK")),
-                    "status": "completed", "payment_method": "paystack",
-                    "description": "Wallet deposit via Paystack",
-                })
+            try:
+                result = wallet_credit_idempotent(
+                    user_id=uid,
+                    amount=amount,
+                    reference=reference,
+                    payment_method="paystack",
+                    description="Wallet deposit via Paystack",
+                    tx_type="deposit",
+                )
+                if result.get("already_processed"):
+                    current_app.logger.info(
+                        f"paystack_webhook: duplicate delivery for {reference}, skipped re-credit")
+            except WalletOperationError as e:
+                current_app.logger.error(f"paystack_webhook credit failed for {uid}: {e}")
+                error = str(e)
+
+    webhook_event_mark_processed(log["id"], error=error)
+    if error:
+        return jsonify({"error": "Processing failed"}), 500
     return jsonify({"status": "ok"})
 
 
@@ -271,26 +338,59 @@ def paystack_webhook():
 def flutterwave_webhook():
     secret = current_app.config.get("FLUTTERWAVE_WEBHOOK_SECRET", "")
     sig    = request.headers.get("verif-hash", "")
-    if secret and sig != secret:
+    # SECURITY FIX: use a constant-time comparison. A plain `!=` string
+    # compare leaks timing information proportional to how many
+    # leading characters match, which — however impractically over a
+    # network — is still the kind of side channel `hmac.compare_digest`
+    # exists specifically to close.
+    if not secret or not hmac.compare_digest(sig, secret):
         return jsonify({"error": "Invalid signature"}), 400
 
     data   = request.get_json(silent=True) or {}
     status = data.get("data", {}).get("status", "")
+
+    # REPLAY PROTECTION: key on Flutterwave's own transaction id
+    # (stable across retries of the same event), falling back to the
+    # tx_ref if the numeric id is ever missing.
+    event_key = str(data.get("data", {}).get("id")
+                     or data.get("data", {}).get("tx_ref") or "unknown")
+    try:
+        log = webhook_event_record("flutterwave", event_key, status, data, True)
+    except WalletOperationError as e:
+        current_app.logger.error(f"flutterwave_webhook: failed to log delivery {event_key}: {e}")
+        return jsonify({"error": "Logging failed"}), 500
+
+    if not log.get("is_new") and log.get("was_processed"):
+        current_app.logger.info(f"flutterwave_webhook: replay of already-processed event {event_key}, skipped")
+        return jsonify({"status": "ok", "replay": True})
+
+    error = None
     if status == "successful":
         meta   = data.get("data", {}).get("meta", {})
         uid    = meta.get("user_id")
         amount = float(data.get("data", {}).get("amount", 0))
+        # Reference MUST come from Flutterwave's own transaction id
+        # whenever present, for the same idempotency reason noted in
+        # the Paystack handler above.
+        reference = str(data.get("data", {}).get("id") or generate_reference("FLW"))
         if uid and amount:
-            user = db_select("users", "id,balance", filters={"id": uid}, single=True)
-            if user:
-                bal_before = float(user["balance"])
-                bal_after  = bal_before + amount
-                db_update("users", {"balance": bal_after}, {"id": uid})
-                db_insert("wallet_transactions", {
-                    "user_id": uid, "type": "deposit", "amount": amount,
-                    "balance_before": bal_before, "balance_after": bal_after,
-                    "reference": str(data.get("data", {}).get("id", generate_reference("FLW"))),
-                    "status": "completed", "payment_method": "flutterwave",
-                    "description": "Wallet deposit via Flutterwave",
-                })
+            try:
+                result = wallet_credit_idempotent(
+                    user_id=uid,
+                    amount=amount,
+                    reference=reference,
+                    payment_method="flutterwave",
+                    description="Wallet deposit via Flutterwave",
+                    tx_type="deposit",
+                )
+                if result.get("already_processed"):
+                    current_app.logger.info(
+                        f"flutterwave_webhook: duplicate delivery for {reference}, skipped re-credit")
+            except WalletOperationError as e:
+                current_app.logger.error(f"flutterwave_webhook credit failed for {uid}: {e}")
+                error = str(e)
+
+    webhook_event_mark_processed(log["id"], error=error)
+    if error:
+        return jsonify({"error": "Processing failed"}), 500
     return jsonify({"status": "ok"})

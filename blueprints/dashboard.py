@@ -3,7 +3,8 @@ from flask import (Blueprint, render_template, redirect, url_for,
 from datetime import datetime, timezone, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from utils.supabase_client import (db_select, db_insert, db_update,
-                                   db_delete, storage_upload, storage_signed_url)
+                                   db_delete, storage_upload, storage_signed_url,
+                                   increment_download_count_atomic, WalletOperationError)
 from utils.decorators import login_required, verified_required
 from utils.helpers import (generate_token, hash_token, generate_reference,
                            fmt_price, allowed_image, safe_filename, log_audit)
@@ -245,21 +246,38 @@ def purchases():
     page   = int(request.args.get("page", 1))
     search = request.args.get("q", "").strip().lower()
 
-    completed = db_select("orders", "*",
-                          filters={"buyer_id": uid, "status": "completed"},
-                          order="-created_at")
+    # Every order the buyer has ever placed that could still have
+    # digital deliverables OR an escrow timeline worth showing —
+    # not just 'completed'. A 'processing' order might already be
+    # 'delivered' in escrow terms (awaiting buyer confirmation), and
+    # a 'disputed' order still needs a place for the buyer to follow
+    # the dispute thread. 'cancelled' orders are excluded since they
+    # never held funds or deliverables.
+    all_orders = db_select("orders", "*", filters={"buyer_id": uid}, order="-created_at")
+    all_orders = [o for o in all_orders if o["status"] != "cancelled"]
     if search:
-        completed = [o for o in completed if search in (o.get("order_number") or "").lower()]
+        all_orders = [o for o in all_orders if search in (o.get("order_number") or "").lower()]
 
     per_page  = 20
-    total     = len(completed)
+    total     = len(all_orders)
     start     = (page - 1) * per_page
-    paginated = completed[start: start + per_page]
+    paginated = all_orders[start: start + per_page]
     pages     = max(1, -(-total // per_page))
 
-    # Enrich with order items
+    # Enrich with order items + escrow timeline. escrow_transactions
+    # is 1:1 with orders (UNIQUE(order_id) in migrations/002), so a
+    # single lookup per order is enough — no N+1 across escrow_events.
     for order in paginated:
-        order["items"] = db_select("order_items", "*", filters={"order_id": order["id"]})
+        order["items"]  = db_select("order_items", "*", filters={"order_id": order["id"]})
+        order["escrow"] = db_select("escrow_transactions", "*",
+                                    filters={"order_id": order["id"]}, single=True)
+        if order["escrow"]:
+            dispute = db_select("disputes", "id,status",
+                                filters={"escrow_transaction_id": order["escrow"]["id"]},
+                                order="-created_at", limit=1)
+            order["dispute"] = dispute[0] if dispute else None
+        else:
+            order["dispute"] = None
 
     return render_template("dashboard/purchases.html",
         orders=paginated, search=search, page=page, pages=pages, total=total)
@@ -287,14 +305,25 @@ def download_item(order_item_id):
             flash("Download link has expired. Contact support.", "warning")
             return redirect(url_for("dashboard.purchases"))
 
-    max_dl = item.get("max_downloads", 5)
-    if item.get("download_count", 0) >= max_dl:
+    # ATOMICITY FIX: the previous check-then-write
+    # (`item.get("download_count") >= max_dl` followed by a separate
+    # increment) allowed concurrent requests (e.g. rapid double-clicks
+    # or multiple tabs) to both pass the check before either increment
+    # landed, letting a buyer exceed max_downloads. The check and the
+    # increment now happen together in one row-locked DB transaction
+    # (increment_download_count_atomic), so only one concurrent
+    # request can ever be the one that pushes the count to the limit.
+    try:
+        result = increment_download_count_atomic(order_item_id)
+    except WalletOperationError as e:
+        current_app.logger.error(f"download_item({order_item_id}): {e}")
+        flash("Something went wrong. Please try again.", "danger")
+        return redirect(url_for("dashboard.purchases"))
+
+    if not result.get("allowed"):
         flash("Maximum downloads reached. Contact support for more.", "warning")
         return redirect(url_for("dashboard.purchases"))
 
-    db_update("order_items",
-              {"download_count": (item.get("download_count") or 0) + 1},
-              {"id": order_item_id})
     log_audit(uid, "download", resource_type="order_item", resource_id=order_item_id)
     return redirect(item.get("download_url", url_for("dashboard.purchases")))
 

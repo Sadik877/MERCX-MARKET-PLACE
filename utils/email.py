@@ -191,6 +191,130 @@ def send_withdrawal_processed(to: str, username: str, amount: float,
     return send_email(to, f"Withdrawal {status_label} — MercX Digital", _render(body))
 
 
+# ── Escrow lifecycle ────────────────────────────────────────────
+
+def send_escrow_delivered(to: str, username: str, order_number: str,
+                           auto_release_hours: int, confirm_url: str) -> bool:
+    """Sent to the buyer the moment a seller marks an order delivered
+    — this is what starts the auto-release countdown."""
+    body = f"""
+    <h2>Your Order Was Delivered 📦</h2>
+    <p>Hi <strong>{username}</strong>, the seller has delivered order <strong>{order_number}</strong>.</p>
+    <div class="info-box">
+      <div class="label">Please Review &amp; Confirm</div>
+      <div class="value" style="font-size:15px">You have {auto_release_hours} hours to confirm receipt or open a dispute.</div>
+    </div>
+    <p>If you don't take any action, funds will be automatically released to the seller after {auto_release_hours} hours.</p>
+    <p style="text-align:center;margin:32px 0">
+      <a href="{confirm_url}" class="btn">Review Your Order</a>
+    </p>
+    """
+    return send_email(to, f"Order {order_number} Delivered — Please Confirm", _render(body))
+
+
+def send_escrow_released(to: str, username: str, order_number: str,
+                          amount: float, reason: str, wallet_url: str) -> bool:
+    """Sent to the SELLER when escrow funds are released to them
+    (buyer confirmation, admin dispute resolution, or auto-release)."""
+    reason_label = {
+        "buyer_confirmed": "the buyer confirmed receipt",
+        "auto_release":    "the review window passed automatically",
+        "dispute_resolved": "a dispute was resolved in your favor",
+    }.get(reason, reason.replace("_", " "))
+    body = f"""
+    <h2>Funds Released to You 💰</h2>
+    <p>Hi <strong>{username}</strong>, escrow funds for order <strong>{order_number}</strong> have been released to your wallet because {reason_label}.</p>
+    <div class="info-box">
+      <div class="label">Amount Released</div>
+      <div class="value" style="color:#10B981">${amount:.2f}</div>
+    </div>
+    <p style="text-align:center;margin:32px 0">
+      <a href="{wallet_url}" class="btn">View Wallet</a>
+    </p>
+    """
+    return send_email(to, f"Funds Released — Order {order_number}", _render(body))
+
+
+def send_dispute_opened(to: str, username: str, order_number: str,
+                         reason: str, is_against_you: bool, dispute_url: str) -> bool:
+    """Sent to both the counterparty (whoever didn't open it) and,
+    separately, as a confirmation to whoever opened it."""
+    heading = "A Dispute Was Opened Against This Order ⚠️" if is_against_you else "Dispute Opened ⚠️"
+    intro = (f"A dispute has been opened on order <strong>{order_number}</strong>. Funds are frozen until an admin reviews it."
+              if is_against_you else
+              f"Your dispute on order <strong>{order_number}</strong> has been submitted and funds are now frozen.")
+    body = f"""
+    <h2>{heading}</h2>
+    <p>Hi <strong>{username}</strong>, {intro}</p>
+    <div class="info-box">
+      <div class="label">Reason</div>
+      <div class="value" style="font-size:15px">{reason.replace('_',' ').title()}</div>
+    </div>
+    <p style="text-align:center;margin:32px 0">
+      <a href="{dispute_url}" class="btn">View Dispute</a>
+    </p>
+    """
+    return send_email(to, f"Dispute Opened — Order {order_number}", _render(body))
+
+
+def send_dispute_message_notification(to: str, username: str, order_number: str,
+                                       sender_label: str, dispute_url: str) -> bool:
+    body = f"""
+    <h2>New Message in Your Dispute 💬</h2>
+    <p>Hi <strong>{username}</strong>, {sender_label} replied on the dispute for order <strong>{order_number}</strong>.</p>
+    <p style="text-align:center;margin:32px 0">
+      <a href="{dispute_url}" class="btn">View Message</a>
+    </p>
+    """
+    return send_email(to, f"New Dispute Message — Order {order_number}", _render(body))
+
+
+def send_dispute_resolved(to: str, username: str, order_number: str,
+                           resolution: str, amount: float, note: str, dispute_url: str) -> bool:
+    label = {"refund_buyer": "Refunded to Buyer", "release_seller": "Released to Seller",
+              "partial_refund": "Partially Refunded"}.get(resolution, resolution.replace("_", " ").title())
+    body = f"""
+    <h2>Dispute Resolved</h2>
+    <p>Hi <strong>{username}</strong>, the dispute on order <strong>{order_number}</strong> has been resolved by our team.</p>
+    <div class="info-box">
+      <div class="label">Resolution</div>
+      <div class="value">{label}</div>
+    </div>
+    {f'<div class="info-box"><div class="label">Amount</div><div class="value">${amount:.2f}</div></div>' if amount else ''}
+    {f'<div class="info-box"><div class="label">Note from our team</div><div class="value" style="font-size:15px">{note}</div></div>' if note else ''}
+    <p style="text-align:center;margin:32px 0">
+      <a href="{dispute_url}" class="btn">View Details</a>
+    </p>
+    """
+    return send_email(to, f"Dispute Resolved — Order {order_number}", _render(body))
+
+
+def send_payout_status(to: str, username: str, amount: float, status: str,
+                        gateway_reference: str = None, note: str = "") -> bool:
+    """Sent to a SELLER for payout_requests (escrow payouts) — distinct
+    from send_withdrawal_processed(), which covers the older generic
+    wallet withdrawal flow."""
+    is_paid = status == "paid"
+    status_color = "#10B981" if is_paid else ("#EF4444" if status in ("rejected", "failed") else "#F59E0B")
+    status_label = {"paid": "Paid ✅", "rejected": "Rejected ❌",
+                    "failed": "Failed ❌", "processing": "Processing ⏳"}.get(status, status.title())
+    body = f"""
+    <h2>Payout {status_label}</h2>
+    <p>Hi <strong>{username}</strong>, your seller payout request has been updated.</p>
+    <div class="info-box">
+      <div class="label">Amount</div>
+      <div class="value">${amount:.2f}</div>
+    </div>
+    <div class="info-box">
+      <div class="label">Status</div>
+      <div class="value" style="color:{status_color}">{status_label}</div>
+    </div>
+    {f'<div class="info-box"><div class="label">Gateway Reference</div><div class="value" style="font-size:14px;font-family:monospace">{gateway_reference}</div></div>' if gateway_reference else ''}
+    {f'<div class="info-box"><div class="label">Note</div><div class="value" style="font-size:15px">{note}</div></div>' if note else ''}
+    """
+    return send_email(to, f"Payout {status_label} — MercX Digital", _render(body))
+
+
 def send_listing_status(to: str, seller_name: str, title: str,
                          status: str, reason: str = "") -> bool:
     approved = status == "approved"

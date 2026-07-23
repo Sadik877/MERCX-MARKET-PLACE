@@ -1,0 +1,346 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Dispute #{{ dispute.id[:8] }} — MercX Digital{% endblock %}
+
+{% block page_content %}
+<div class="mb-6">
+  <a href="{{ url_for('dashboard.purchases') }}" class="flex items-center gap-1 text-sm" style="color:var(--text-muted)">
+    <i data-feather="arrow-left" style="width:14px;height:14px"></i> Back to Purchases
+  </a>
+</div>
+
+<!-- Header -->
+<div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+  <div>
+    <div class="flex items-center gap-3 mb-1">
+      <h1 class="font-display text-2xl font-bold">Dispute</h1>
+      <span class="font-mono text-sm" style="color:var(--text-muted)">#{{ dispute.id[:8].upper() }}</span>
+      {% set ds = dispute.status %}
+      {% if ds == 'open' %}
+        <span class="badge" style="background:rgba(239,68,68,.15);color:#EF4444;border:1px solid rgba(239,68,68,.2)">Open</span>
+      {% elif ds == 'under_review' %}
+        <span class="badge" style="background:rgba(245,158,11,.15);color:#F59E0B;border:1px solid rgba(245,158,11,.2)">Under Review</span>
+      {% elif ds == 'resolved' %}
+        <span class="badge" style="background:rgba(16,185,129,.15);color:#10B981;border:1px solid rgba(16,185,129,.2)">Resolved</span>
+      {% elif ds == 'closed' %}
+        <span class="badge" style="background:rgba(148,163,184,.15);color:#94A3B8;border:1px solid rgba(148,163,184,.2)">Closed</span>
+      {% endif %}
+    </div>
+    <p style="color:var(--text-muted);font-size:.88rem">
+      Opened {{ dispute.created_at[:10] }} · Reason: <strong style="color:var(--text)">{{ dispute.reason|replace('_',' ')|title }}</strong>
+    </p>
+  </div>
+</div>
+
+<div class="grid gap-6" style="grid-template-columns:1fr 340px">
+
+  <!-- ── Left column: thread ─────────────────────────────────────── -->
+  <div>
+
+    <!-- Description card -->
+    <div class="card mb-4">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-feather="file-text" style="width:16px;height:16px;color:var(--primary-light)"></i>
+        <span class="font-semibold text-sm">Description</span>
+      </div>
+      <p style="font-size:.9rem;line-height:1.7;color:var(--text)">{{ dispute.description or 'No description provided.' }}</p>
+    </div>
+
+    <!-- Timeline / Messages -->
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <i data-feather="message-square" style="width:16px;height:16px;color:var(--primary-light)"></i>
+          <span class="font-semibold text-sm">Dispute Thread</span>
+        </div>
+        <span class="text-sm" style="color:var(--text-muted)">{{ messages|length }} message{{ 's' if messages|length != 1 }}</span>
+      </div>
+
+      <!-- Full timeline -->
+      <div id="dispute-timeline" style="display:flex;flex-direction:column;gap:.75rem">
+
+        <!-- System event: opened -->
+        <div class="flex gap-3">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center" style="background:rgba(239,68,68,.15)">
+            <i data-feather="alert-triangle" style="width:14px;height:14px;color:#EF4444"></i>
+          </div>
+          <div style="flex:1">
+            <div class="text-xs font-semibold" style="color:#EF4444">Dispute Opened</div>
+            <div class="text-xs" style="color:var(--text-muted)">{{ dispute.created_at[:16].replace('T',' ') }} UTC</div>
+            <div class="text-sm mt-1" style="color:var(--text)">Funds frozen pending admin review.</div>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        {% for msg in messages %}
+        {% set is_mine = msg.sender_id == session.get('user_id') %}
+        {% set is_admin_msg = msg.get('is_admin_note', False) %}
+        <div class="flex gap-3 {% if is_mine %}flex-row-reverse{% endif %}">
+          <!-- Avatar -->
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs"
+               style="{% if is_admin_msg %}background:rgba(245,158,11,.2);color:#F59E0B{% elif is_mine %}background:rgba(124,58,237,.2);color:#a78bfa{% else %}background:rgba(6,182,212,.2);color:#06B6D4{% endif %}">
+            {% if is_admin_msg %}A{% elif is_mine %}Y{% else %}T{% endif %}
+          </div>
+          <!-- Bubble -->
+          <div style="max-width:75%">
+            <div class="text-xs mb-1 {% if is_mine %}text-right{% endif %}" style="color:var(--text-muted)">
+              {% if is_admin_msg %}<span style="color:#F59E0B;font-weight:600">Support</span>{% elif is_mine %}You{% else %}Other Party{% endif %}
+              · {{ msg.created_at[:16].replace('T',' ') }} UTC
+            </div>
+            <div class="rounded-2xl px-4 py-3 text-sm"
+                 style="{% if is_admin_msg %}background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:var(--text){% elif is_mine %}background:rgba(124,58,237,.18);border:1px solid rgba(124,58,237,.3);color:var(--text){% else %}background:var(--bg-surface);border:1px solid var(--border);color:var(--text){% endif %};line-height:1.6;word-break:break-word">
+              {{ msg.message }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+
+        <!-- Resolution event -->
+        {% if dispute.status == 'resolved' %}
+        <div class="flex gap-3">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center" style="background:rgba(16,185,129,.15)">
+            <i data-feather="check-circle" style="width:14px;height:14px;color:#10B981"></i>
+          </div>
+          <div>
+            <div class="text-xs font-semibold" style="color:#10B981">Dispute Resolved</div>
+            <div class="text-xs" style="color:var(--text-muted)">{{ dispute.updated_at[:16].replace('T',' ') if dispute.updated_at else '' }} UTC</div>
+            {% if dispute.resolution %}
+            <div class="text-sm mt-1 font-medium" style="color:var(--text)">
+              Decision: {{ dispute.resolution|replace('_',' ')|title }}
+            </div>
+            {% endif %}
+            {% if dispute.resolution_note %}
+            <div class="text-sm mt-1" style="color:var(--text-muted)">{{ dispute.resolution_note }}</div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
+      </div><!-- /timeline -->
+
+      <!-- Attachments placeholder -->
+      <div class="mt-4 p-3 rounded-xl" style="background:var(--bg-surface);border:1px dashed var(--border)">
+        <div class="flex items-center gap-2 text-sm" style="color:var(--text-muted)">
+          <i data-feather="paperclip" style="width:14px;height:14px"></i>
+          Attachments — file upload coming soon
+        </div>
+      </div>
+    </div>
+
+    <!-- Reply box (active disputes only) -->
+    {% if dispute.status in ('open', 'under_review') %}
+    <div class="card">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-feather="send" style="width:15px;height:15px;color:var(--primary-light)"></i>
+        <span class="font-semibold text-sm">Send a Message</span>
+      </div>
+      <textarea id="reply-box" rows="4" class="input w-full mb-3" placeholder="Describe your position clearly…" style="resize:vertical;font-size:.9rem"></textarea>
+      <div class="flex items-center justify-between">
+        <span class="text-xs" style="color:var(--text-muted)">Be professional — an admin reviews all messages.</span>
+        <button id="reply-btn" class="btn btn-primary btn-sm flex items-center gap-2" onclick="sendReply()">
+          <i data-feather="send" style="width:13px;height:13px"></i> Send
+        </button>
+      </div>
+      <div id="reply-error" class="text-sm mt-2" style="color:#EF4444;display:none"></div>
+    </div>
+    {% endif %}
+
+  </div><!-- /left col -->
+
+  <!-- ── Right column: info panels ───────────────────────────────── -->
+  <div style="display:flex;flex-direction:column;gap:1rem">
+
+    <!-- Order summary -->
+    <div class="card">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-feather="shopping-bag" style="width:15px;height:15px;color:var(--primary-light)"></i>
+        <span class="font-semibold text-sm">Order Summary</span>
+      </div>
+      <div class="text-sm" style="display:flex;flex-direction:column;gap:.6rem">
+        <div class="flex justify-between">
+          <span style="color:var(--text-muted)">Order</span>
+          {% set order_link = url_for('dashboard.purchases') %}
+          <a href="{{ order_link }}" class="font-mono" style="color:var(--primary-light);font-size:.8rem">
+            #{{ dispute.order_id[:8].upper() if dispute.order_id else '—' }}
+          </a>
+        </div>
+        {% if escrow %}
+        <div class="flex justify-between">
+          <span style="color:var(--text-muted)">Amount</span>
+          <span class="font-semibold">${{ '%.2f'|format(escrow.amount|float) }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span style="color:var(--text-muted)">Payment</span>
+          <span>{{ escrow.payment_method|replace('_',' ')|title }}</span>
+        </div>
+        {% endif %}
+        <div class="flex justify-between">
+          <span style="color:var(--text-muted)">Reason</span>
+          <span>{{ dispute.reason|replace('_',' ')|title }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Escrow status -->
+    {% if escrow %}
+    <div class="card">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-feather="lock" style="width:15px;height:15px;color:var(--warning)"></i>
+        <span class="font-semibold text-sm">Escrow Status</span>
+      </div>
+      {% set es = escrow.status %}
+      <div class="flex items-center gap-2 mb-3">
+        {% if es == 'held' or es == 'disputed' %}
+          <span class="badge" style="background:rgba(245,158,11,.15);color:#F59E0B;border:1px solid rgba(245,158,11,.2)">
+            <i data-feather="lock" style="width:11px;height:11px;display:inline-block;margin-right:3px"></i>Funds Frozen
+          </span>
+        {% elif es == 'released' %}
+          <span class="badge badge-success">Released</span>
+        {% elif es == 'refunded' %}
+          <span class="badge" style="background:rgba(124,58,237,.15);color:#a78bfa;border:1px solid rgba(124,58,237,.2)">Refunded</span>
+        {% else %}
+          <span class="badge">{{ es|title }}</span>
+        {% endif %}
+      </div>
+      <div class="text-xs" style="display:flex;flex-direction:column;gap:.5rem;color:var(--text-muted)">
+        <div class="flex justify-between">
+          <span>Held since</span>
+          <span>{{ escrow.created_at[:10] }}</span>
+        </div>
+        {% if escrow.released_at %}
+        <div class="flex justify-between">
+          <span>Released</span>
+          <span>{{ escrow.released_at[:10] }}</span>
+        </div>
+        {% endif %}
+        {% if escrow.seller_earnings %}
+        <div class="flex justify-between">
+          <span>Seller earnings</span>
+          <span>${{ '%.2f'|format(escrow.seller_earnings|float) }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Resolution status -->
+    <div class="card">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-feather="shield" style="width:15px;height:15px;color:var(--primary-light)"></i>
+        <span class="font-semibold text-sm">Resolution</span>
+      </div>
+      {% if dispute.status == 'resolved' %}
+      <div class="p-3 rounded-xl" style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2)">
+        <div class="text-sm font-semibold mb-1" style="color:#10B981">{{ dispute.resolution|replace('_',' ')|title if dispute.resolution else 'Resolved' }}</div>
+        {% if dispute.resolution_note %}
+        <div class="text-xs" style="color:var(--text-muted)">{{ dispute.resolution_note }}</div>
+        {% endif %}
+      </div>
+      {% elif dispute.status == 'open' %}
+      <div class="p-3 rounded-xl" style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2)">
+        <div class="text-sm font-semibold" style="color:#EF4444">Awaiting admin review</div>
+        <div class="text-xs mt-1" style="color:var(--text-muted)">Our team will respond within 48 hours.</div>
+      </div>
+      {% elif dispute.status == 'under_review' %}
+      <div class="p-3 rounded-xl" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2)">
+        <div class="text-sm font-semibold" style="color:#F59E0B">Under Review</div>
+        <div class="text-xs mt-1" style="color:var(--text-muted)">Admin is reviewing your case.</div>
+      </div>
+      {% else %}
+      <div class="text-sm" style="color:var(--text-muted)">{{ dispute.status|title }}</div>
+      {% endif %}
+    </div>
+
+    <!-- Admin resolve panel -->
+    {% if is_admin and dispute.status in ('open','under_review') %}
+    <div class="card" style="border-color:rgba(245,158,11,.25)">
+      <div class="flex items-center gap-2 mb-3">
+        <i data-feather="tool" style="width:15px;height:15px;color:#F59E0B"></i>
+        <span class="font-semibold text-sm" style="color:#F59E0B">Admin Actions</span>
+      </div>
+      <form action="{{ url_for('escrow.admin_resolve_dispute', dispute_id=dispute.id) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Resolution</label>
+          <select name="resolution" id="resolution-select" class="input w-full text-sm" onchange="togglePartialRefund(this.value)">
+            <option value="release_seller">Release funds to seller</option>
+            <option value="refund_buyer">Full refund to buyer</option>
+            <option value="partial_refund">Partial refund</option>
+            <option value="no_action">No action / close</option>
+          </select>
+        </div>
+        <div id="partial-refund-row" style="display:none" class="mb-3">
+          <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Refund Amount</label>
+          <input type="number" name="refund_amount" class="input w-full text-sm" step="0.01" min="0.01" placeholder="0.00">
+        </div>
+        <div class="mb-3">
+          <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Note to parties</label>
+          <textarea name="note" rows="3" class="input w-full text-sm" placeholder="Explain decision…" style="resize:vertical"></textarea>
+        </div>
+        <button type="submit" class="btn w-full text-sm" style="background:#F59E0B;color:#000;font-weight:700">
+          Resolve Dispute
+        </button>
+      </form>
+    </div>
+    {% endif %}
+
+  </div><!-- /right col -->
+</div><!-- /grid -->
+
+<script>
+function sendReply() {
+  const box = document.getElementById('reply-box');
+  const btn = document.getElementById('reply-btn');
+  const err = document.getElementById('reply-error');
+  const text = box.value.trim();
+  if (!text) { err.textContent = 'Message cannot be empty.'; err.style.display='block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Sending…';
+
+  fetch('{{ url_for("escrow.dispute_message", dispute_id=dispute.id) }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || '' },
+    body: JSON.stringify({ message: text })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.ok) {
+      box.value = '';
+      // Append message bubble immediately
+      const tl = document.getElementById('dispute-timeline');
+      const now = new Date().toISOString().slice(0,16).replace('T',' ');
+      const div = document.createElement('div');
+      div.className = 'flex gap-3 flex-row-reverse';
+      div.innerHTML = `
+        <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs"
+             style="background:rgba(124,58,237,.2);color:#a78bfa">Y</div>
+        <div style="max-width:75%">
+          <div class="text-xs mb-1 text-right" style="color:var(--text-muted)">You · ${now} UTC</div>
+          <div class="rounded-2xl px-4 py-3 text-sm"
+               style="background:rgba(124,58,237,.18);border:1px solid rgba(124,58,237,.3);color:var(--text);line-height:1.6;word-break:break-word">
+            ${data.message.message.replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+          </div>
+        </div>`;
+      tl.appendChild(div);
+      tl.scrollTop = tl.scrollHeight;
+    } else {
+      err.textContent = data.error || 'Could not send message.'; err.style.display = 'block';
+    }
+  })
+  .catch(() => { err.textContent = 'Network error — please try again.'; err.style.display = 'block'; })
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = '<i data-feather="send" style="width:13px;height:13px"></i> Send';
+    if (window.feather) feather.replace();
+  });
+}
+
+function togglePartialRefund(val) {
+  document.getElementById('partial-refund-row').style.display = val === 'partial_refund' ? 'block' : 'none';
+}
+
+// Allow Ctrl+Enter to send
+document.getElementById('reply-box')?.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendReply();
+});
+</script>
+{% endblock %}

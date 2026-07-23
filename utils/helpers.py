@@ -197,3 +197,29 @@ def log_audit(user_id, action: str, resource_type: str = None,
         "ip_address":    ip,
         "user_agent":    ua,
     })
+
+
+# ── In-app notification helper ─────────────────────────────────
+#
+# Mirrors the exact db_insert("notifications", {...}) shape already
+# used throughout blueprints/admin.py — pulled out into one place so
+# the new escrow/dispute/payout event points (blueprints/escrow.py)
+# don't each hand-roll the same dict. Never raises: a failed
+# notification insert should not roll back or interrupt the
+# financial operation that triggered it.
+
+def notify_user(user_id, type: str, icon: str, title: str,
+                 message: str, link: str = None) -> None:
+    from utils.supabase_client import db_insert
+    try:
+        db_insert("notifications", {
+            "user_id": str(user_id),
+            "type":    type,
+            "icon":    icon,
+            "title":   title,
+            "message": message,
+            "link":    link,
+        })
+    except Exception:
+        import logging
+        logging.getLogger(__name__).error(f"notify_user failed for {user_id} ({type})", exc_info=True)

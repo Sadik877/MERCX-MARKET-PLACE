@@ -45,6 +45,10 @@ class Config:
     # ── Redis ─────────────────────────────────────────────────
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+    # ── Escrow ────────────────────────────────────────────────
+    ESCROW_AUTO_RELEASE_HOURS = int(os.environ.get("ESCROW_AUTO_RELEASE_HOURS", 72))
+    CRON_SECRET               = os.environ.get("CRON_SECRET", "")
+
     # ── Upload / File Limits ──────────────────────────────────
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", 52428800))  # 50 MB
     ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "svg"}

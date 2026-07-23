@@ -4,7 +4,8 @@ from flask import (Blueprint, render_template, redirect, url_for,
                    request, session, flash, current_app, jsonify, Response)
 from datetime import datetime, timezone, timedelta
 from utils.supabase_client import (db_select, db_insert, db_update,
-                                   db_delete, storage_upload)
+                                   db_delete, storage_upload,
+                                   escrow_mark_delivered, WalletOperationError)
 from utils.decorators import login_required, seller_required, verified_required
 from utils.helpers import (make_slug, sanitize_html, allowed_image, allowed_file,
                            safe_filename, calc_platform_fee, log_audit, generate_reference)
@@ -626,30 +627,38 @@ def deliver_order(order_id):
         "delivered_at":      datetime.now(timezone.utc).isoformat(),
     }, {"id": item_id, "order_id": order_id})
 
-    # Check if all items delivered
+    # Check if all items delivered. Guard on order status too: if this
+    # order was already marked "completed" (e.g. deliver_order fired
+    # twice for the last remaining item — double-click, retry, or two
+    # concurrent requests), don't re-trigger escrow a second time.
     remaining = db_select("order_items", "id",
                           filters={"order_id": order_id, "delivery_status": "pending"})
-    if not remaining:
+    if not remaining and order.get("status") != "completed":
         db_update("orders", {"status": "completed"}, {"id": order_id})
-        # Credit seller
-        buyer    = db_select("users", "email,username,balance",
-                             filters={"id": order["buyer_id"]}, single=True)
-        s_user   = db_select("users", "id,balance", filters={"id": sid}, single=True)
-        fee, earnings = calc_platform_fee(float(order["total"]))
-        bal_before = float(s_user["balance"])
-        bal_after  = bal_before + earnings
-        db_update("users", {"balance": bal_after}, {"id": sid})
-        db_insert("wallet_transactions", {
-            "user_id": sid, "type": "sale", "amount": earnings,
-            "balance_before": bal_before, "balance_after": bal_after,
-            "reference": generate_reference("SL"), "status": "completed",
-            "description": f"Sale — Order {order['order_number']}",
-            "order_id": order_id,
-        })
+
+        # ESCROW: delivery no longer pays the seller directly. It starts
+        # the escrow's auto-release countdown; the seller is paid when
+        # the buyer confirms receipt (dashboard.purchases) or when the
+        # auto-release deadline passes, whichever comes first. This
+        # replaces the old "credit on delivery" flow, which paid the
+        # seller before the buyer had any chance to dispute.
+        esc = db_select("escrow_transactions", "id,status", filters={"order_id": order_id}, single=True)
+        if esc:
+            try:
+                escrow_mark_delivered(
+                    esc["id"], sid,
+                    auto_release_hours=current_app.config.get("ESCROW_AUTO_RELEASE_HOURS", 72),
+                )
+            except WalletOperationError as e:
+                current_app.logger.error(f"escrow_mark_delivered failed for order {order_id}: {e}")
+                flash("Delivery recorded, but starting the payout timer failed. Contact support.", "warning")
+        else:
+            current_app.logger.error(f"deliver_order: no escrow transaction found for order {order_id}")
+
         db_insert("notifications", {
             "user_id": order["buyer_id"], "type": "order_delivered",
             "title": "Your order is ready!", "icon": "package",
-            "message": f"Order {order['order_number']} has been delivered.",
+            "message": f"Order {order['order_number']} has been delivered. Please confirm receipt.",
             "link": "/dashboard/purchases",
         })
 

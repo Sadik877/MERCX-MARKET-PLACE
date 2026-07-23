@@ -21,6 +21,12 @@ def create_app():
     csrf.exempt("blueprints.api.stripe_webhook")
     csrf.exempt("blueprints.api.paystack_webhook")
     csrf.exempt("blueprints.api.flutterwave_webhook")
+    # Exempt the auto-release sweep: it's invoked either by an
+    # authenticated admin click (session-based, CSRF token present)
+    # OR by an external scheduler with no browser session at all
+    # (authenticated instead via the X-Cron-Secret header inside the
+    # route itself) — CSRF tokens don't apply to that second caller.
+    csrf.exempt("blueprints.escrow.run_auto_release")
 
     # ── Blueprints ────────────────────────────────────────────
     from blueprints.main        import main_bp
@@ -30,6 +36,7 @@ def create_app():
     from blueprints.marketplace import marketplace_bp
     from blueprints.admin       import admin_bp
     from blueprints.api         import api_bp
+    from blueprints.escrow      import escrow_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp,        url_prefix="/auth")
@@ -38,6 +45,7 @@ def create_app():
     app.register_blueprint(marketplace_bp, url_prefix="/marketplace")
     app.register_blueprint(admin_bp,       url_prefix="/admin")
     app.register_blueprint(api_bp,         url_prefix="/api")
+    app.register_blueprint(escrow_bp)
 
     # ── Rate-limit sensitive routes ───────────────────────────
     limiter.limit("10 per minute")(auth_bp)

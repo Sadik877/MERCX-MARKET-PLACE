@@ -1,0 +1,324 @@
+{% extends 'seller/base.html' %}
+{% block title %}Payout Accounts — MercX Seller{% endblock %}
+
+{% block page_content %}
+<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-display text-2xl font-bold">Payout Accounts</h1>
+    <p style="color:var(--text-muted);font-size:.88rem">Manage where your earnings get sent</p>
+  </div>
+  <button onclick="document.getElementById('add-account-modal').style.display='flex'"
+          class="btn btn-primary btn-sm flex items-center gap-2">
+    <i data-feather="plus" style="width:14px;height:14px"></i> Add Account
+  </button>
+</div>
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="alert alert-{{ cat }} mb-4" role="alert">{{ msg }}</div>
+{% endfor %}
+{% endwith %}
+
+<!-- Saved accounts -->
+{% if accounts %}
+<div class="card mb-6">
+  <div class="flex items-center gap-2 mb-4">
+    <i data-feather="credit-card" style="width:16px;height:16px;color:var(--primary-light)"></i>
+    <span class="font-semibold">Saved Accounts</span>
+    <span class="badge ml-1" style="background:rgba(124,58,237,.15);color:#a78bfa">{{ accounts|length }}</span>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:.75rem">
+    {% for acct in accounts %}
+    {% set d = acct.details %}
+    <div class="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl"
+         style="background:var(--bg-surface);border:1px solid {% if acct.is_default %}rgba(16,185,129,.3){% else %}var(--border){% endif %}">
+
+      <!-- Icon + label -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+             style="background:{% if acct.method == 'stripe' %}rgba(99,91,255,.2){% elif acct.method == 'paystack' %}rgba(0,200,120,.2){% elif acct.method == 'flutterwave' %}rgba(243,113,39,.2){% elif acct.method == 'paypal' %}rgba(0,112,186,.2){% elif acct.method == 'crypto' %}rgba(247,147,26,.2){% else %}rgba(124,58,237,.2){% endif %}">
+          {% if acct.method == 'stripe' %}
+            <i data-feather="zap" style="width:16px;height:16px;color:#6356FF"></i>
+          {% elif acct.method == 'paystack' %}
+            <i data-feather="check-circle" style="width:16px;height:16px;color:#00C878"></i>
+          {% elif acct.method == 'flutterwave' %}
+            <i data-feather="wind" style="width:16px;height:16px;color:#F37127"></i>
+          {% elif acct.method == 'paypal' %}
+            <i data-feather="globe" style="width:16px;height:16px;color:#0070BA"></i>
+          {% elif acct.method == 'crypto' %}
+            <i data-feather="box" style="width:16px;height:16px;color:#F7931A"></i>
+          {% else %}
+            <i data-feather="dollar-sign" style="width:16px;height:16px;color:var(--primary-light)"></i>
+          {% endif %}
+        </div>
+        <div>
+          <div class="font-semibold text-sm flex items-center gap-2">
+            {{ acct.label or acct.method|replace('_',' ')|title }}
+            {% if acct.is_default %}
+            <span class="badge badge-success" style="font-size:.65rem;padding:.2rem .5rem">Default</span>
+            {% endif %}
+            {% if acct.is_verified %}
+            <span class="badge" style="font-size:.65rem;padding:.2rem .5rem;background:rgba(16,185,129,.15);color:#10B981;border:1px solid rgba(16,185,129,.2)">
+              <i data-feather="shield" style="width:9px;height:9px;display:inline-block;margin-right:2px"></i>Verified
+            </span>
+            {% endif %}
+          </div>
+          <div class="text-xs" style="color:var(--text-muted)">
+            {% if acct.method == 'stripe' %}Stripe · {{ d.stripe_account_id or '—' }}
+            {% elif acct.method == 'paypal' %}PayPal · {{ d.paypal_email or '—' }}
+            {% elif acct.method == 'crypto' %}{{ d.network|upper if d.network else 'Crypto' }} · {{ (d.address or '')[:16] }}…
+            {% else %}{{ d.bank_name or '' }} · {{ d.account_number[-4:] if d.account_number else '—' }}{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-2">
+        {% if not acct.is_default %}
+        <form action="{{ url_for('escrow.payout_account_make_default', account_id=acct.id) }}" method="POST" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-sm" style="background:rgba(16,185,129,.12);color:#10B981;border:1px solid rgba(16,185,129,.25);font-size:.75rem">
+            Set Default
+          </button>
+        </form>
+        {% endif %}
+        <form action="{{ url_for('escrow.payout_account_delete', account_id=acct.id) }}" method="POST"
+              onsubmit="return confirm('Remove this payout account?')" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#EF4444;border:1px solid rgba(239,68,68,.2);font-size:.75rem">
+            <i data-feather="trash-2" style="width:12px;height:12px"></i>
+          </button>
+        </form>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="card mb-6">
+  <div class="empty-state">
+    <div class="icon-wrap"><i data-feather="credit-card" style="width:26px;height:26px"></i></div>
+    <div class="font-display font-semibold">No payout accounts yet</div>
+    <div class="text-sm" style="color:var(--text-muted)">Add an account to receive your earnings</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Payout history -->
+{% if payouts %}
+<div class="card">
+  <div class="flex items-center gap-2 mb-4">
+    <i data-feather="clock" style="width:16px;height:16px;color:var(--primary-light)"></i>
+    <span class="font-semibold">Payout History</span>
+  </div>
+  <div style="overflow-x:auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border)">
+          <th class="text-left py-2 px-1" style="color:var(--text-muted);font-weight:600;font-size:.75rem">Date</th>
+          <th class="text-left py-2 px-1" style="color:var(--text-muted);font-weight:600;font-size:.75rem">Method</th>
+          <th class="text-right py-2 px-1" style="color:var(--text-muted);font-weight:600;font-size:.75rem">Amount</th>
+          <th class="text-right py-2 px-1" style="color:var(--text-muted);font-weight:600;font-size:.75rem">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in payouts %}
+        <tr style="border-bottom:1px solid var(--border)">
+          <td class="py-3 px-1" style="color:var(--text-muted)">{{ p.requested_at[:10] if p.requested_at else '—' }}</td>
+          <td class="py-3 px-1">{{ (p.destination or {}).get('method', p.get('method','—'))|replace('_',' ')|title }}</td>
+          <td class="py-3 px-1 text-right font-semibold">${{ '%.2f'|format(p.amount|float) }}</td>
+          <td class="py-3 px-1 text-right">
+            {% if p.status == 'approved' %}<span class="badge badge-success" style="font-size:.7rem">Paid</span>
+            {% elif p.status == 'pending' %}<span class="badge" style="font-size:.7rem;background:rgba(245,158,11,.15);color:#F59E0B">Pending</span>
+            {% elif p.status == 'rejected' %}<span class="badge" style="font-size:.7rem;background:rgba(239,68,68,.15);color:#EF4444">Rejected</span>
+            {% else %}<span class="badge" style="font-size:.7rem">{{ p.status|title }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Add Account Modal ──────────────────────────────────────────── -->
+<div id="add-account-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.7);padding:1rem">
+  <div class="card" style="width:100%;max-width:520px;max-height:90vh;overflow-y:auto;position:relative">
+    <button onclick="document.getElementById('add-account-modal').style.display='none'"
+            style="position:absolute;top:1rem;right:1rem;background:none;border:none;cursor:pointer;color:var(--text-muted)">
+      <i data-feather="x" style="width:18px;height:18px"></i>
+    </button>
+
+    <div class="flex items-center gap-2 mb-4">
+      <i data-feather="plus-circle" style="width:16px;height:16px;color:var(--primary-light)"></i>
+      <h2 class="font-display font-bold text-lg">Add Payout Account</h2>
+    </div>
+
+    <form action="{{ url_for('escrow.payout_account_save') }}" method="POST" id="payout-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <!-- Method picker -->
+      <div class="mb-4">
+        <label class="text-xs font-semibold mb-2 block" style="color:var(--text-muted)">Payout Method</label>
+        <div class="grid gap-2" style="grid-template-columns:repeat(3,1fr)">
+          {% for m in methods %}
+          <label class="method-tile flex flex-col items-center gap-1 p-3 rounded-xl cursor-pointer text-center"
+                 style="border:2px solid var(--border);transition:all .15s"
+                 onmouseover="this.style.borderColor='var(--primary-light)'"
+                 onmouseout="if(!this.querySelector('input').checked)this.style.borderColor='var(--border)'">
+            <input type="radio" name="method" value="{{ m }}" onchange="switchMethod('{{ m }}')"
+                   {% if loop.first %}checked{% endif %}
+                   style="display:none">
+            {% if m == 'stripe' %}<i data-feather="zap" style="width:18px;height:18px;color:#6356FF"></i>
+            {% elif m == 'paystack' %}<i data-feather="check-circle" style="width:18px;height:18px;color:#00C878"></i>
+            {% elif m == 'flutterwave' %}<i data-feather="wind" style="width:18px;height:18px;color:#F37127"></i>
+            {% elif m == 'paypal' %}<i data-feather="globe" style="width:18px;height:18px;color:#0070BA"></i>
+            {% elif m == 'crypto' %}<i data-feather="box" style="width:18px;height:18px;color:#F7931A"></i>
+            {% else %}<i data-feather="dollar-sign" style="width:18px;height:18px;color:var(--primary-light)"></i>
+            {% endif %}
+            <span class="text-xs font-semibold">{{ m|replace('_',' ')|title }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Label -->
+      <div class="mb-3">
+        <label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Nickname (optional)</label>
+        <input type="text" name="label" class="input w-full" placeholder="e.g. GTBank NGN, Personal Stripe">
+      </div>
+
+      <!-- Bank Transfer fields -->
+      <div id="fields-bank_transfer" class="method-fields">
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Account Name <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_name" class="input w-full" placeholder="Name on account"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Account Number <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_number" class="input w-full" placeholder="0123456789"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Bank Name <span style="color:#EF4444">*</span></label>
+          <input type="text" name="bank_name" class="input w-full" placeholder="e.g. Chase, Barclays"></div>
+      </div>
+
+      <!-- Paystack fields -->
+      <div id="fields-paystack" class="method-fields" style="display:none">
+        <div class="p-3 rounded-xl mb-3" style="background:rgba(0,200,120,.08);border:1px solid rgba(0,200,120,.2)">
+          <div class="text-xs" style="color:#00C878">Paystack — Nigeria, Ghana, South Africa</div>
+        </div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Account Name <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_name" class="input w-full" placeholder="Account holder name"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Account Number <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_number" class="input w-full" placeholder="NUBAN account number"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Bank Code <span style="color:#EF4444">*</span></label>
+          <input type="text" name="bank_code" class="input w-full" placeholder="e.g. 058 (GTBank)"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Bank Name</label>
+          <input type="text" name="bank_name" class="input w-full" placeholder="e.g. Guaranty Trust Bank"></div>
+      </div>
+
+      <!-- Flutterwave fields -->
+      <div id="fields-flutterwave" class="method-fields" style="display:none">
+        <div class="p-3 rounded-xl mb-3" style="background:rgba(243,113,39,.08);border:1px solid rgba(243,113,39,.2)">
+          <div class="text-xs" style="color:#F37127">Flutterwave — Africa, global transfers</div>
+        </div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Account Name <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_name" class="input w-full" placeholder="Account holder name"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Account Number <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_number" class="input w-full" placeholder="Account number"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Bank Code <span style="color:#EF4444">*</span></label>
+          <input type="text" name="account_bank" class="input w-full" placeholder="e.g. 044 (Access Bank)"></div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Bank Name</label>
+          <input type="text" name="bank_name" class="input w-full" placeholder="e.g. Access Bank"></div>
+      </div>
+
+      <!-- Stripe fields -->
+      <div id="fields-stripe" class="method-fields" style="display:none">
+        <div class="p-3 rounded-xl mb-3" style="background:rgba(99,91,255,.08);border:1px solid rgba(99,91,255,.2)">
+          <div class="text-xs" style="color:#6356FF">Stripe Connected Account — automatic payouts</div>
+        </div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Stripe Account ID <span style="color:#EF4444">*</span></label>
+          <input type="text" name="stripe_account_id" class="input w-full" placeholder="acct_1Abc23XyZ"></div>
+      </div>
+
+      <!-- PayPal fields -->
+      <div id="fields-paypal" class="method-fields" style="display:none">
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">PayPal Email <span style="color:#EF4444">*</span></label>
+          <input type="email" name="paypal_email" class="input w-full" placeholder="you@paypal.com"></div>
+      </div>
+
+      <!-- Crypto fields -->
+      <div id="fields-crypto" class="method-fields" style="display:none">
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Network <span style="color:#EF4444">*</span></label>
+          <select name="network" class="input w-full">
+            <option value="ethereum">Ethereum (ERC-20)</option>
+            <option value="bitcoin">Bitcoin</option>
+            <option value="tron">Tron (TRC-20)</option>
+            <option value="bnb">BNB Smart Chain</option>
+            <option value="solana">Solana</option>
+          </select>
+        </div>
+        <div class="mb-3"><label class="text-xs font-semibold mb-1 block" style="color:var(--text-muted)">Wallet Address <span style="color:#EF4444">*</span></label>
+          <input type="text" name="address" class="input w-full font-mono" placeholder="0x…"></div>
+      </div>
+
+      <!-- Default toggle -->
+      <label class="flex items-center gap-3 mb-4 cursor-pointer">
+        <div class="relative">
+          <input type="checkbox" name="is_default" value="on" id="default-toggle" style="display:none" onchange="toggleVisual(this)">
+          <div id="toggle-track" class="w-10 h-6 rounded-full transition-colors" style="background:var(--border)"></div>
+          <div id="toggle-thumb" class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform"></div>
+        </div>
+        <div>
+          <div class="text-sm font-semibold">Set as default</div>
+          <div class="text-xs" style="color:var(--text-muted)">Payouts will use this account automatically</div>
+        </div>
+      </label>
+
+      <div class="flex gap-3">
+        <button type="button" onclick="document.getElementById('add-account-modal').style.display='none'"
+                class="btn flex-1" style="background:var(--bg-surface);border:1px solid var(--border)">Cancel</button>
+        <button type="submit" class="btn btn-primary flex-1">
+          <i data-feather="save" style="width:14px;height:14px"></i> Save Account
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function switchMethod(method) {
+  document.querySelectorAll('.method-fields').forEach(el => el.style.display = 'none');
+  const target = document.getElementById('fields-' + method);
+  if (target) target.style.display = 'block';
+
+  // Highlight selected tile
+  document.querySelectorAll('.method-tile').forEach(tile => {
+    tile.style.borderColor = tile.querySelector('input').checked ? 'var(--primary-light)' : 'var(--border)';
+    tile.style.background  = tile.querySelector('input').checked ? 'rgba(124,58,237,.08)' : '';
+  });
+}
+
+function toggleVisual(el) {
+  const track = document.getElementById('toggle-track');
+  const thumb = document.getElementById('toggle-thumb');
+  if (el.checked) {
+    track.style.background = '#7C3AED';
+    thumb.style.transform  = 'translateX(16px)';
+  } else {
+    track.style.background = 'var(--border)';
+    thumb.style.transform  = 'translateX(0)';
+  }
+}
+
+// Init first method on load
+document.addEventListener('DOMContentLoaded', function() {
+  const checked = document.querySelector('input[name="method"]:checked');
+  if (checked) switchMethod(checked.value);
+});
+
+// Close modal on backdrop click
+document.getElementById('add-account-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+</script>
+{% endblock %}

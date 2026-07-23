@@ -2,7 +2,10 @@ from flask import (Blueprint, render_template, redirect, url_for,
                    request, session, flash, current_app, jsonify)
 from datetime import datetime, timezone, timedelta
 from utils.supabase_client import (db_select, db_insert, db_update,
-                                   db_delete, db_upsert, storage_signed_url)
+                                   db_delete, db_upsert, storage_signed_url,
+                                   checkout_wallet_debit_atomic, WalletOperationError,
+                                   increment_listing_views, increment_download_count_atomic,
+                                   escrow_hold_create)
 from utils.decorators import login_required, verified_required
 from utils.helpers import (calc_platform_fee, generate_reference,
                            log_audit, fmt_price)
@@ -130,8 +133,10 @@ def listing_detail(slug):
         flash("Product not found.", "danger")
         return redirect(url_for("marketplace.index"))
 
-    # Increment views
-    db_update("listings", {"views": (listing.get("views") or 0) + 1}, {"id": listing["id"]})
+    # Increment views atomically (DB-side UPDATE ... SET views = views + 1)
+    # instead of a read-then-write in Python, which under concurrent
+    # page loads could lose increments (classic lost-update race).
+    increment_listing_views(listing["id"])
 
     # Seller info
     seller  = db_select("users", "id,username", filters={"id": listing["seller_id"]}, single=True)
@@ -454,9 +459,54 @@ def checkout():
         note           = request.form.get("note", "").strip()[:500]
 
         if payment_method == "wallet":
-            if wallet_balance < total:
+            # ATOMICITY / RACE-CONDITION FIX
+            # ------------------------------
+            # Previously this route did an in-Python check
+            # (`wallet_balance < total`, where wallet_balance was read
+            # much earlier in the request) and only debited the wallet
+            # AFTER creating all order/order_item rows, via a separate
+            # non-atomic read-modify-write. That allowed:
+            #   - Two concurrent checkouts (e.g. a double-click, or two
+            #     browser tabs) both reading the same stale balance and
+            #     both passing the check, resulting in the buyer
+            #     spending more than their actual balance.
+            #   - A crash/error between order creation and the wallet
+            #     debit leaving orders created with no payment taken.
+            #   - A retried/duplicated request re-debiting the wallet
+            #     for the same checkout.
+            #
+            # Fix: generate the ledger reference up front and perform
+            # the balance check + debit as a single, row-locked,
+            # idempotent DB transaction (checkout_wallet_debit_atomic)
+            # BEFORE creating any orders. If it reports insufficient
+            # funds, we stop immediately with no orders created. If a
+            # retry of this exact request happens (same reference),
+            # the function is a no-op the second time -- but since we
+            # only generate the reference once per submitted request
+            # and don't persist/reuse it across separate user
+            # submissions, distinct checkout attempts still get fresh
+            # references and are charged independently, exactly as
+            # intended by the original (unchanged) business logic.
+            purchase_reference = generate_reference("PUR")
+            try:
+                debit_result = checkout_wallet_debit_atomic(
+                    user_id=uid,
+                    amount=total,
+                    reference=purchase_reference,
+                    description=f"Purchase — {len(cart_listings)} item(s)",
+                )
+            except WalletOperationError as e:
+                current_app.logger.error(f"checkout wallet debit failed for {uid}: {e}")
+                flash("We couldn't process your payment. Please try again.", "danger")
+                return redirect(url_for("marketplace.checkout"))
+
+            if not debit_result.get("success"):
                 flash("Insufficient wallet balance.", "danger")
                 return redirect(url_for("marketplace.checkout"))
+
+            bal_before = debit_result.get("balance_before")
+            bal_after  = debit_result.get("balance_after")
+            purchase_tx_id = debit_result.get("tx_id")
 
             # Group by seller
             sellers = {}
@@ -489,6 +539,36 @@ def checkout():
                     continue
 
                 created_orders.append(order)
+
+                # ESCROW: move this order's payment into a hold instead of
+                # crediting the seller directly. For instant-delivery
+                # orders (all items delivered immediately below) the hold
+                # is created already "delivered" so the auto-release clock
+                # starts now — this also fixes a pre-existing gap where
+                # instant orders were marked "completed" at checkout but
+                # never actually paid the seller anything.
+                all_instant_for_hold = all(l["delivery_type"] == "instant" for l in s_listings)
+                try:
+                    escrow_hold_create(
+                        order_id=order["id"],
+                        buyer_id=uid,
+                        seller_id=sid,
+                        amount=s_net,
+                        platform_fee=fee,
+                        seller_earnings=earnings,
+                        payment_method="wallet",
+                        payment_reference=f"{purchase_reference}-{order['id']}",
+                        instant_delivery=all_instant_for_hold,
+                        auto_release_hours=current_app.config.get("ESCROW_AUTO_RELEASE_HOURS", 72),
+                    )
+                except WalletOperationError as e:
+                    # The buyer's wallet has already been debited above;
+                    # failing to open the hold here would silently strand
+                    # that payment with no seller credit path. Log loudly
+                    # so ops can create the hold manually / refund, but
+                    # don't block order creation — the buyer already paid.
+                    current_app.logger.error(
+                        f"escrow_hold_create failed for order {order['id']}: {e}")
 
                 # Create order items
                 expires_at = (datetime.now(timezone.utc) +
@@ -538,21 +618,16 @@ def checkout():
                     "link":  "/seller/orders",
                 })
 
-            # Deduct from buyer wallet
-            bal_before = wallet_balance
-            bal_after  = wallet_balance - total
-            db_update("users", {"balance": bal_after}, {"id": uid})
-            db_insert("wallet_transactions", {
-                "user_id":        uid,
-                "type":           "purchase",
-                "amount":         total,
-                "balance_before": bal_before,
-                "balance_after":  bal_after,
-                "reference":      generate_reference("PUR"),
-                "status":         "completed",
-                "description":    f"Purchase — {len(cart_listings)} item(s)",
-                "order_id":       created_orders[0]["id"] if created_orders else None,
-            })
+            # Wallet has already been debited atomically above, before
+            # any orders were created (see checkout_wallet_debit_atomic
+            # call). We only need to backfill the order_id link on the
+            # ledger row now that we know which order it applies to --
+            # this is a non-financial metadata update, so it's safe to
+            # do as a normal (non-atomic) update.
+            if created_orders and purchase_tx_id:
+                db_update("wallet_transactions",
+                          {"order_id": created_orders[0]["id"]},
+                          {"id": purchase_tx_id})
 
             # Track coupon use
             if coupon_obj and created_orders:

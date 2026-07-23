@@ -4,119 +4,313 @@ A production-ready marketplace for buying and selling digital products — softw
 
 ---
 
-## Features
-
-- **Marketplace** — browse, search, filter by category, sort, cart, checkout, coupons, secure digital downloads
-- **Sellers** — create/edit/pause/delete listings, inventory management, order fulfillment (instant + manual delivery), analytics, store pages
-- **Buyers** — wallet, order history, downloads with expiry/limits, wishlist, messaging, reviews, referrals
-- **Admin panel** — user management, listing moderation, order/refund handling, wallet approvals, categories, coupons, reports, support tickets, audit logs, site settings, analytics
-- **Security** — CSRF protection, rate limiting, password hashing, input sanitization, security headers, audit logging
-- **Payments** — wallet balance, Stripe, Paystack, Flutterwave (webhook handlers included)
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.11+, Flask |
-| Database | Supabase (PostgreSQL) |
-| Frontend | Tailwind CSS, vanilla JS, Jinja2 |
-| Charts | Chart.js |
-| Icons | Feather Icons |
-| Auth | Flask sessions + Werkzeug password hashing |
-| Email | SMTP (HTML templates) |
-
----
-
-## Project Structure
+## Architecture
 
 ```
-mercx_digital/
-├── app.py                  # Flask app factory, blueprints, error handlers
-├── config.py                # Environment-based configuration
-├── schema.sql                # Full Supabase/Postgres schema, triggers, seed data
+Browser → Flask (Blueprints) → Supabase PostgreSQL
+                ↓
+        Atomic DB Functions (wallet, escrow)
+                ↓
+        Payment Gateways (Stripe, Paystack, Flutterwave)
+                ↓
+        SMTP Email + In-app Notifications
+```
+
+### Blueprints
+
+| Blueprint | Prefix | Purpose |
+|---|---|---|
+| `main` | `/` | Landing, search, static pages |
+| `auth` | `/auth` | Login, register, password reset |
+| `dashboard` | `/dashboard` | Buyer wallet, orders, downloads, messages |
+| `marketplace` | `/` | Browse, listing detail, cart, checkout |
+| `seller` | `/seller` | Seller dashboard, listings, analytics |
+| `escrow` | `/` | Escrow lifecycle, disputes, payouts |
+| `admin` | `/admin` | Full admin panel |
+| `api` | `/api` | AJAX endpoints, payment webhooks |
+
+### Project Structure
+
+```
+mercx/
+├── app.py                       # Flask factory, blueprints, error handlers
+├── config.py                    # Environment configuration
+├── schema.sql                   # Full Postgres schema
 ├── requirements.txt
-├── .env.example               # Copy to .env and fill in your keys
+├── .env.example
 ├── blueprints/
-│   ├── main.py                # Landing page, search, static pages
-│   ├── auth.py                 # Login, register, password reset, email verification
-│   ├── dashboard.py             # Buyer dashboard: wallet, orders, messages, settings
-│   ├── seller.py                 # Seller dashboard: listings, orders, analytics
-│   ├── marketplace.py             # Browse, listing detail, cart, checkout
-│   ├── admin.py                    # Admin panel: users, listings, orders, wallet, etc.
-│   └── api.py                       # AJAX endpoints + payment webhooks
+│   ├── escrow.py                # Escrow, disputes, payouts (NEW)
+│   ├── admin.py                 # Admin panel
+│   ├── seller.py                # Seller hub
+│   ├── dashboard.py             # Buyer dashboard
+│   ├── marketplace.py           # Browse / checkout
+│   ├── auth.py                  # Auth
+│   ├── main.py                  # Landing
+│   └── api.py                   # Webhooks + AJAX
+├── migrations/
+│   ├── 001_atomic_wallet_functions.sql
+│   ├── 002_escrow_system.sql
+│   └── 003_seller_payout_accounts.sql
+├── scripts/
+│   └── cron_auto_release.py     # Cron job for escrow auto-release
+├── tests/
+│   └── test_escrow_lifecycle.py # Escrow lifecycle test suite
 ├── utils/
-│   ├── supabase_client.py           # Supabase query helpers
-│   ├── decorators.py                 # @login_required, @seller_required, etc.
-│   ├── helpers.py                     # Slugs, formatting, pagination, tokens
-│   └── email.py                        # Transactional HTML emails
-├── static/
-│   ├── css/main.css                    # Design system (glassmorphism, dark mode)
-│   └── js/main.js                       # Toasts, autocomplete, cart, wishlist, etc.
-└── templates/                            # All Jinja2 templates (60+ pages)
+│   ├── supabase_client.py
+│   ├── decorators.py
+│   ├── helpers.py
+│   ├── email.py
+│   └── gateways.py              # Stripe / Paystack / Flutterwave
+└── templates/
+    ├── admin/
+    │   ├── base.html            # Admin nav (Disputes + Payouts)
+    │   ├── disputes.html
+    │   └── payouts.html
+    ├── seller/
+    │   ├── base.html            # Seller nav (Payout Accounts)
+    │   └── payout_account.html
+    └── dashboard/
+        ├── purchases.html       # Escrow timeline + actions
+        └── dispute_detail.html
 ```
+
+---
+
+## Escrow Flow
+
+```
+Checkout → escrow_create()
+              │  status: held
+              ↓
+        Seller delivers product
+              │  status: delivered  ← auto_release_at starts
+              ↓
+    ┌─────────┴──────────┐
+    │                    │
+Buyer confirms      Buyer opens dispute
+    │                    │  status: disputed
+status: released    Admin reviews
+    │                    │
+Seller paid       ┌──────┴────────┐
+                  │               │
+            release_seller   refund_buyer
+                               (full / partial)
+```
+
+### Escrow Statuses
+
+| Status | Description |
+|---|---|
+| `held` | Funds locked after checkout |
+| `delivered` | Seller marked delivery; countdown started |
+| `released` | Funds sent to seller wallet |
+| `disputed` | Buyer opened dispute; funds frozen |
+| `refunded` | Admin refunded buyer |
+
+### Auto-Release
+
+If the buyer does not confirm or dispute within the review window, escrow is released automatically via the cron job. The window is set by `AUTO_RELEASE_DAYS` (default: 7 days after delivery).
+
+---
+
+## Gateway Setup
+
+### Stripe
+
+```env
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+Webhook events handled: `payment_intent.succeeded`, `charge.refunded`
+
+### Paystack
+
+```env
+PAYSTACK_SECRET_KEY=sk_live_...
+PAYSTACK_WEBHOOK_SECRET=...
+```
+
+Webhook events: `charge.success`, `transfer.success`
+
+### Flutterwave
+
+```env
+FLUTTERWAVE_SECRET_KEY=FLWSECK_...
+FLUTTERWAVE_WEBHOOK_SECRET=...
+```
+
+Webhook events: `charge.completed`, `transfer.completed`
+
+---
+
+## Webhook Setup
+
+1. Point your gateway's webhook URL to: `https://yourdomain.com/api/webhooks/<gateway>`
+   - Stripe: `/api/webhooks/stripe`
+   - Paystack: `/api/webhooks/paystack`
+   - Flutterwave: `/api/webhooks/flutterwave`
+
+2. Configure the webhook secrets in your `.env`. Each gateway signs its payloads; the handler verifies the signature before processing.
+
+3. Webhooks are idempotent — replaying the same event reference is a no-op.
+
+---
+
+## Cron Setup
+
+The `scripts/cron_auto_release.py` script calls the `/admin/escrow/auto-release` endpoint to sweep all overdue escrows and release them to sellers.
+
+### Run manually
+
+```bash
+CRON_SECRET=your-secret BASE_URL=https://yourapp.com python scripts/cron_auto_release.py
+```
+
+### Crontab (every hour)
+
+```cron
+0 * * * * CRON_SECRET=your-secret BASE_URL=https://yourapp.com python /app/scripts/cron_auto_release.py >> /var/log/mercx-escrow.log 2>&1
+```
+
+### Render / Railway / Heroku Scheduler
+
+Set the run command to:
+```
+python scripts/cron_auto_release.py
+```
+And add `CRON_SECRET` and `BASE_URL` to the service environment variables.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SECRET_KEY` | ✓ | — | Flask session secret |
+| `SUPABASE_URL` | ✓ | — | Supabase project URL |
+| `SUPABASE_SECRET_KEY` | ✓ | — | Supabase secret key (`sb_secret_...`) |
+| `FLASK_ENV` | — | `development` | Set to `production` for deployment |
+| `MAIL_SERVER` | — | — | SMTP host |
+| `MAIL_PORT` | — | `587` | SMTP port |
+| `MAIL_USERNAME` | — | — | SMTP login |
+| `MAIL_PASSWORD` | — | — | SMTP password |
+| `MAIL_DEFAULT_SENDER` | — | — | From address |
+| `STRIPE_SECRET_KEY` | — | — | Stripe secret key |
+| `STRIPE_WEBHOOK_SECRET` | — | — | Stripe webhook signing secret |
+| `PAYSTACK_SECRET_KEY` | — | — | Paystack secret key |
+| `PAYSTACK_WEBHOOK_SECRET` | — | — | Paystack webhook signing secret |
+| `FLUTTERWAVE_SECRET_KEY` | — | — | Flutterwave secret key |
+| `FLUTTERWAVE_WEBHOOK_SECRET` | — | — | Flutterwave webhook signing secret |
+| `COMMISSION_RATE` | — | `0.05` | Platform commission (0.05 = 5%) |
+| `AUTO_RELEASE_DAYS` | — | `7` | Days after delivery before auto-release |
+| `DOWNLOAD_EXPIRY_DAYS` | — | `30` | Download link validity |
+| `MAX_DOWNLOADS` | — | `5` | Max download attempts per item |
+| `CRON_SECRET` | — | — | Shared secret for cron endpoint auth |
+| `BASE_URL` | — | `http://127.0.0.1:5000` | Used by cron script to hit the API |
+| `SUPABASE_STORAGE_BUCKET` | — | `mercx-assets` | Supabase Storage bucket name |
+| `SESSION_COOKIE_SECURE` | — | `false` | Set `true` in production |
+
+---
+
+## Testing
+
+```bash
+pip install pytest pytest-mock
+pytest tests/ -v
+```
+
+The test suite in `tests/test_escrow_lifecycle.py` covers:
+
+- Wallet funding & idempotency
+- Escrow creation & platform fee calculation
+- Delivery marking & auto-release timer
+- Buyer manual confirmation
+- Auto-release trigger logic
+- Dispute opening & freezing
+- Full refund
+- Partial refund & amount validation
+- Seller payout request & approval
+- Webhook replay protection
+- Gateway failure handling
+- Concurrency / optimistic locking
+
+All tests run without a live database or gateway — the entire escrow lifecycle is exercised through unit-level simulations.
 
 ---
 
 ## Setup
 
 ### 1. Install dependencies
+
 ```bash
-pip install -r requirements.txt --break-system-packages
+pip install -r requirements.txt
 ```
 
-### 2. Create a Supabase project
-- Go to [supabase.com](https://supabase.com) and create a new project
-- Open the **SQL Editor** and run the entire contents of `schema.sql`
-- This creates all tables, indexes, triggers, default categories, and site settings
+### 2. Create Supabase project
 
-### 3. Configure environment variables
+- Go to [supabase.com](https://supabase.com) and create a new project
+- Run `schema.sql` in the SQL Editor, then apply the three migrations in order:
+  ```bash
+  # In Supabase SQL Editor or via psql:
+  \i migrations/001_atomic_wallet_functions.sql
+  \i migrations/002_escrow_system.sql
+  \i migrations/003_seller_payout_accounts.sql
+  ```
+
+### 3. Configure environment
+
 ```bash
 cp .env.example .env
+# Fill in required variables (see table above)
 ```
-Fill in at minimum:
-- `SECRET_KEY` — any long random string
-- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` — from Supabase project settings → API → Secret keys (`sb_secret_...`)
-- `MAIL_*` — SMTP credentials (Gmail app password works fine for testing)
 
-> **Note:** This project uses Supabase's newer non-JWT `sb_secret_...` key format, not the legacy `service_role` JWT. This requires `supabase-py>=2.20.0` (already pinned in `requirements.txt`). If you ever see `SupabaseException: Invalid API key` raised directly from inside `create_client()`, it means an old `supabase-py` version got installed — clear your host's build cache and reinstall so it picks up the pinned version.
+### 4. Create storage bucket
 
-Payment gateway keys (`STRIPE_*`, `PAYSTACK_*`, `FLUTTERWAVE_*`) are optional — wallet payments work without them.
-
-### 4. Create a storage bucket
-In Supabase → Storage, create a bucket named `mercx-assets` (or match `SUPABASE_STORAGE_BUCKET` in your `.env`). Set it to public for listing images, and use signed URLs (already handled in code) for private product files.
+In Supabase → Storage, create a bucket named `mercx-assets`. Set listing images to public, use signed URLs for product files (handled automatically).
 
 ### 5. Run the app
+
 ```bash
 python app.py
 ```
-Visit `http://localhost:5000`.
+
+---
+
+## Deployment
+
+### Render / Railway
+
+1. Set all environment variables in the service dashboard
+2. Start command: `gunicorn app:app`
+3. Add a cron job service pointing to `scripts/cron_auto_release.py` (hourly)
+
+### Production checklist
+
+- [ ] `FLASK_ENV=production`
+- [ ] `SESSION_COOKIE_SECURE=true`
+- [ ] `SECRET_KEY` is a long random string
+- [ ] Webhook secrets configured for all active gateways
+- [ ] `CRON_SECRET` set and matches the cron job environment
+- [ ] Supabase RLS policies reviewed (Flask uses the secret key which bypasses RLS)
+- [ ] SMTP sender configured and verified
 
 ---
 
 ## Creating an Admin User
 
-There's no seed admin — register a normal account through the UI, then promote it manually in Supabase:
+Register normally through the UI, then promote in Supabase:
 
 ```sql
-update users set role = 'admin' where email = 'you@example.com';
+UPDATE users SET role = 'admin' WHERE email = 'you@example.com';
 ```
 
-Then visit `/admin` while logged in as that user.
-
----
-
-## Deployment (Render / Railway / etc.)
-
-- Set the same environment variables from `.env` in your host's dashboard
-- Start command: `gunicorn app:app`
-- Make sure `SESSION_COOKIE_SECURE=true` and `FLASK_ENV=production` in production
+Then visit `/admin`.
 
 ---
 
 ## Notes
 
-- **RLS**: The schema enables Row Level Security on core tables. The Flask backend uses the Supabase **secret key** (`SUPABASE_SECRET_KEY`), which bypasses RLS — this is expected since all access control happens in the Flask app itself.
-- **File delivery**: Digital files are stored in Supabase Storage and delivered via signed URLs with configurable expiry (`DOWNLOAD_EXPIRY_DAYS`) and download limits (`MAX_DOWNLOADS`).
-- **Commission rate**: Set via `COMMISSION_RATE` in `.env` (default 10%), applied automatically to seller payouts on order completion.
+- **RLS**: The schema enables Row Level Security. The Flask backend uses the Supabase secret key which bypasses RLS — all access control is enforced in Flask decorators (`@login_required`, `@seller_required`, `@admin_required`).
+- **Atomic operations**: Wallet debits/credits and escrow state transitions use PostgreSQL stored procedures (see `migrations/001` and `002`) to prevent race conditions.
+- **Escrow is 1:1 with orders**: One escrow transaction per order (`UNIQUE(order_id)` constraint in migration 002). No separate escrow record means no funds were held (e.g. a wallet top-up order).
