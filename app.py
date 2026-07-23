@@ -11,7 +11,18 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["500 per hour"])
 
 def create_app():
     app = Flask(__name__)
-    app.config.from_object(get_config())
+    cfg_obj = get_config()
+    app.config.from_object(cfg_obj)
+
+    # Surface the active config class + DEBUG in the deploy logs so a
+    # forgotten/misspelled FLASK_ENV is immediately visible, instead of
+    # silently running in the wrong mode (see config.py for why this
+    # matters — DEBUG=True in production bypasses the custom error pages).
+    import os as _os
+    app.logger.info(
+        f"Starting with config={cfg_obj.__name__} DEBUG={app.config.get('DEBUG')} "
+        f"FLASK_ENV={_os.environ.get('FLASK_ENV', 'unset (defaults to production)')}"
+    )
 
     # ── Extensions ────────────────────────────────────────────
     csrf.init_app(app)

@@ -72,7 +72,14 @@ class Config:
     REFERRAL_BONUS        = 5.00
 
 class DevelopmentConfig(Config):
-    DEBUG = True
+    # Respect FLASK_DEBUG (read in the base Config class) rather than
+    # hardcoding True here. Hardcoding it previously meant any deployment
+    # that fell through to this class (e.g. a missing/misspelled FLASK_ENV
+    # on Render) silently ran with DEBUG=True, which makes Flask bypass the
+    # custom @app.errorhandler(500) page entirely — propagate_exceptions
+    # defaults to True whenever app.debug is True — and dump a bare
+    # "Internal Server Error" instead of errors/500.html.
+    pass
 
 class ProductionConfig(Config):
     DEBUG = False
@@ -81,9 +88,12 @@ class ProductionConfig(Config):
 config_map = {
     "development": DevelopmentConfig,
     "production":  ProductionConfig,
-    "default":     DevelopmentConfig,
+    "default":     ProductionConfig,
 }
 
 def get_config():
-    env = os.environ.get("FLASK_ENV", "development")
-    return config_map.get(env, DevelopmentConfig)
+    # Fail safe, not fail open: default to production if FLASK_ENV isn't
+    # explicitly set, so a forgotten env var on a real deployment never
+    # silently turns on DEBUG (see DevelopmentConfig note above).
+    env = os.environ.get("FLASK_ENV", "production")
+    return config_map.get(env, ProductionConfig)
